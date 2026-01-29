@@ -1,0 +1,140 @@
+================================================================================
+CONVAI DESKTOP PET - BUILD AND RUN COMMANDS
+================================================================================
+
+PROJECT INFORMATION:
+--------------------
+Application Name: Convai Desktop Pet
+Main Entry Point: main.js
+Package Manager: npm
+Framework: Electron
+
+================================================================================
+PREREQUISITES:
+================================================================================
+
+1. Node.js and npm must be installed
+   - Check Node.js version: node --version
+   - Check npm version: npm --version
+
+2. Install dependencies (run this first if not already done):
+   npm install
+
+================================================================================
+DEVELOPMENT COMMANDS:
+================================================================================
+
+1. RUN THE APPLICATION (Development Mode):
+   -----------------------------------------
+   Command: npm start
+   
+   Alternative: electron .
+   
+   Description: Starts the Electron application in development mode.
+   This will launch the desktop pet on your screen.
+
+================================================================================
+BUILD COMMANDS (Create Distributable):
+================================================================================
+
+1. BUILD FOR ALL PLATFORMS:
+   -------------------------
+   Command: npm run build
+   
+   Alternative: electron-builder
+   
+   Description: Creates distributable packages for Windows, Mac, and Linux.
+   Output directory: dist/
+   
+2. BUILD FOR SPECIFIC PLATFORM:
+   -----------------------------
+   
+   Windows (NSIS Installer):
+   Command: npm run build -- --win
+   Alternative: electron-builder --win
+   Output: dist/Convai Desktop Pet Setup.exe
+   
+   macOS (DMG):
+   Command: npm run build -- --mac
+   Alternative: electron-builder --mac
+   Output: dist/Convai Desktop Pet.dmg
+   
+   Linux (DEB):
+   Command: npm run build -- --linux
+   Alternative: electron-builder --linux
+   Output: dist/convai-desktop-pet_1.0.0_amd64.deb
+
+================================================================================
+TESTING COMMANDS:
+================================================================================
+
+1. RUN TESTS:
+   ----------
+   Command: npm test
+   
+   Note: Currently configured to show "Error: no test specified"
+   Tests need to be implemented.
+
+================================================================================
+COMMON WORKFLOWS:
+================================================================================
+
+1. FIRST TIME SETUP:
+   -----------------
+   Step 1: npm install
+   Step 2: npm start
+
+2. DEVELOPMENT WORKFLOW:
+   ---------------------
+   Step 1: Make code changes
+   Step 2: npm start (to test changes)
+   Step 3: Repeat as needed
+
+3. PRODUCTION BUILD WORKFLOW:
+   --------------------------
+   Step 1: Ensure all changes are tested
+   Step 2: npm run build
+   Step 3: Find installer in dist/ folder
+   Step 4: Test the installer
+
+================================================================================
+TROUBLESHOOTING:
+================================================================================
+
+1. If "npm start" fails:
+   - Ensure dependencies are installed: npm install
+   - Check if port is already in use
+   - Verify main.js exists in the project root
+
+2. If "npm run build" fails:
+   - Ensure electron-builder is installed: npm install electron-builder --save-dev
+   - Check that icon files exist in build/icons/
+   - Verify package.json build configuration is correct
+
+3. If application doesn't start:
+   - Check console for error messages
+   - Verify all required files (main.js, renderer.js, etc.) exist
+   - Ensure assets folder contains character images
+
+================================================================================
+ADDITIONAL INFORMATION:
+================================================================================
+
+Dependencies:
+- electron: ^33.2.1
+- convai-web-sdk: ^0.1.4
+- electron-store: ^10.0.0
+
+Dev Dependencies:
+- electron-builder: ^25.1.8
+- electron-reloader: ^1.2.3
+
+Build Configuration:
+- App ID: com.your.app
+- Product Name: Convai Desktop Pet
+- Output Directory: dist/
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+

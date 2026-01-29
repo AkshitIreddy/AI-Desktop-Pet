@@ -12,6 +12,9 @@
                 <li class="nav-item" data-page="settings">Settings</li>
                 <li class="nav-item" data-page="customization">Convai Character Customization</li>
             </ul>
+            <div class="sidebar-footer">
+                <button id="create-character-btn" class="create-character-btn">+ Create Character</button>
+            </div>
         </div>
         <div class="main-content">
             <div id="characters-page" class="page active">
@@ -84,8 +87,41 @@
                         <label for="move-duration">Default Move Duration (ms):</label>
                         <input type="number" id="move-duration" min="1" max="1000">
                     </div>
+                    <div class="setting-item accent-color-setting">
+                        <label>Accent Color:</label>
+                        <div class="color-options">
+                            <div class="color-option" data-color="#ec4899" title="Reddish Pink"></div>
+                            <div class="color-option" data-color="#f43f5e" title="Rose"></div>
+                            <div class="color-option" data-color="#8b5cf6" title="Purple"></div>
+                            <div class="color-option" data-color="#6366f1" title="Indigo"></div>
+                            <div class="color-option" data-color="#3b82f6" title="Blue"></div>
+                            <div class="color-option" data-color="#06b6d4" title="Cyan"></div>
+                            <div class="color-option" data-color="#10b981" title="Emerald"></div>
+                            <div class="color-option" data-color="#f59e0b" title="Amber"></div>
+                        </div>
+                    </div>
+                    
+                    <h3 class="settings-section-title">Pet Customization</h3>
+                    
+                    <div class="setting-item slider-setting">
+                        <label for="pet-size">Pet Size: <span id="pet-size-value">100%</span></label>
+                        <input type="range" id="pet-size" min="50" max="200" value="100" step="10">
+                    </div>
+                    <div class="setting-item slider-setting">
+                        <label for="pet-opacity">Pet Opacity: <span id="pet-opacity-value">100%</span></label>
+                        <input type="range" id="pet-opacity" min="30" max="100" value="100" step="5">
+                    </div>
+                    <div class="setting-item slider-setting">
+                        <label for="animation-speed">Animation Speed: <span id="animation-speed-value">1.0x</span></label>
+                        <input type="range" id="animation-speed" min="0.5" max="2" value="1" step="0.1">
+                    </div>
+                    
                     <button id="save-settings" class="update-button">Save Settings</button>
                 </div>
+                
+                <h2 style="margin-top: 30px;">Archived Characters</h2>
+                <p style="color: #888; margin-bottom: 15px;">Archived characters are hidden from the main list. Click restore to bring them back.</p>
+                <div id="archived-characters-list" class="archived-list"></div>
             </div>
         </div>
     </div>

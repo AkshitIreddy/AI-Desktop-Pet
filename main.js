@@ -1,5 +1,6 @@
 const { app, BrowserWindow, screen, Menu, Tray, ipcMain, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const CharacterStore = require('./characterStore');
 
 const characterStore = new CharacterStore();
@@ -111,6 +112,12 @@ function createPet(name) {
     console.log(`[${name}]: ${message}`);
   })
 
+  // Send settings to pet window after it loads
+  petWindow.webContents.on('did-finish-load', () => {
+    const settings = characterStore.getSettings();
+    petWindow.webContents.send('settings-updated', settings);
+  });
+
   petWindows.set(name, petWindow);
 }
 
@@ -215,6 +222,130 @@ app.whenReady().then(async () => {
           petWindow.webContents.send('settings-updated', settings);
         }
       }
+    });
+
+    // Rename character handler
+    ipcMain.on('rename-character', async (event, oldName, newName) => {
+      try {
+        // Check if pet is currently spawned - close it first
+        const wasSpawned = characterStore.getCharacterSpawn(oldName);
+        if (wasSpawned) {
+          closePet(oldName);
+        }
+
+        // Rename in store
+        const result = characterStore.renameCharacter(oldName, newName);
+        
+        if (result.renamed) {
+          // Rename the assets folder
+          const oldPath = path.join(__dirname, 'assets', oldName);
+          const newPath = path.join(__dirname, 'assets', result.newName);
+          
+          if (fs.existsSync(oldPath)) {
+            fs.renameSync(oldPath, newPath);
+          }
+
+          // Rename in characters.json
+          characterStore.renameAnimationConfig(oldName, result.newName);
+
+          // If was spawned, respawn with new name
+          if (wasSpawned) {
+            characterStore.setCharacterSpawn(result.newName, true);
+            createPet(result.newName);
+          }
+        }
+
+        event.reply('rename-character-result', { success: true, oldName, newName: result.newName });
+        event.reply('characters', characterStore.getAllCharacters());
+      } catch (error) {
+        event.reply('rename-character-result', { success: false, error: error.message });
+      }
+    });
+
+    // Add new character handler
+    ipcMain.on('add-character', async (event, characterData) => {
+      try {
+        const { name, characterId, animationConfig, assets } = characterData;
+        
+        // Add to store
+        const sanitizedName = characterStore.addCharacter(name, characterId, animationConfig);
+        
+        // Create assets folder
+        const assetsPath = path.join(__dirname, 'assets', sanitizedName);
+        if (!fs.existsSync(assetsPath)) {
+          fs.mkdirSync(assetsPath, { recursive: true });
+        }
+
+        // Save uploaded assets
+        for (const [filename, base64Data] of Object.entries(assets)) {
+          const filePath = path.join(assetsPath, filename);
+          const buffer = Buffer.from(base64Data.split(',')[1], 'base64');
+          fs.writeFileSync(filePath, buffer);
+        }
+
+        // Save animation config to characters.json
+        characterStore.saveAnimationConfig(sanitizedName, animationConfig);
+
+        event.reply('add-character-result', { success: true, name: sanitizedName });
+        event.reply('characters', characterStore.getAllCharacters());
+      } catch (error) {
+        event.reply('add-character-result', { success: false, error: error.message });
+      }
+    });
+
+    // Delete character handler
+    ipcMain.on('delete-character', async (event, name) => {
+      try {
+        // Close pet if spawned
+        if (characterStore.getCharacterSpawn(name)) {
+          closePet(name);
+        }
+
+        // Delete from store
+        characterStore.deleteCharacter(name);
+
+        // Delete from characters.json
+        characterStore.deleteAnimationConfig(name);
+
+        // Delete assets folder
+        const assetsPath = path.join(__dirname, 'assets', name);
+        if (fs.existsSync(assetsPath)) {
+          fs.rmSync(assetsPath, { recursive: true, force: true });
+        }
+
+        event.reply('delete-character-result', { success: true, name });
+        event.reply('characters', characterStore.getAllCharacters());
+      } catch (error) {
+        event.reply('delete-character-result', { success: false, error: error.message });
+      }
+    });
+
+    // Archive/unarchive character handler
+    ipcMain.on('archive-character', (event, name, archived) => {
+      try {
+        // Close pet if spawned and archiving
+        if (archived && characterStore.getCharacterSpawn(name)) {
+          closePet(name);
+        }
+
+        characterStore.setCharacterArchived(name, archived);
+        event.reply('archive-character-result', { success: true, name, archived });
+        event.reply('characters', characterStore.getAllCharacters());
+      } catch (error) {
+        event.reply('archive-character-result', { success: false, error: error.message });
+      }
+    });
+
+    // Check if character is user-added
+    ipcMain.on('is-user-added', (event, name) => {
+      const isUserAdded = characterStore.isUserAddedCharacter(name);
+      event.reply('is-user-added-result', { name, isUserAdded });
+    });
+
+    // Get animation config for a character
+    ipcMain.on('get-animation-config', (event, name) => {
+      const config = characterStore.getAnimationConfig(name);
+      event.reply('animation-config', { name, config });
     });
   } catch (error) {
     console.error('Failed to initialize the app:', error);

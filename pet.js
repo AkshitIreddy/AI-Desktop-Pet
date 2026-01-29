@@ -39,6 +39,18 @@ const petHeight = 100;
 const gravity = 0.1;
 const damping = 0.98;
 
+// Pre-calculated constant for landing position
+const landingY = screenHeight - petHeight;
+
+// Animation frame and interval tracking for cleanup
+let animationFrameId = null;
+let responseBoxUpdateInterval = null;
+let responseBoxCheckInterval = null;
+
+// Track previous state for optimization
+let previousTransform = '';
+let previousPosition = { x: -1, y: -1 };
+
 let isDragging = false;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
@@ -96,6 +108,47 @@ ipcRenderer.on('character-config', (event, config) => {
     });
 });
 
+// Pet customization settings
+let petSizeScale = 1.0;
+let petOpacityValue = 1.0;
+let animationSpeedMultiplier = 1.0;
+
+// Apply pet customization settings
+function applyPetSettings(settings) {
+    if (settings.petSize !== undefined) {
+        petSizeScale = settings.petSize / 100;
+        // Force transform update by clearing previous
+        previousTransform = '';
+    }
+    if (settings.petOpacity !== undefined) {
+        petOpacityValue = settings.petOpacity / 100;
+        pet.style.opacity = petOpacityValue;
+    }
+    
+    // Update base durations from settings if provided
+    if (settings.defaultFrameDuration !== undefined) {
+        defaultFrameDuration = settings.defaultFrameDuration;
+    }
+    if (settings.defaultMoveDuration !== undefined) {
+        defaultMoveDuration = settings.defaultMoveDuration;
+    }
+    
+    // Apply animation speed multiplier
+    if (settings.animationSpeed !== undefined) {
+        animationSpeedMultiplier = settings.animationSpeed;
+    }
+    
+    // Recalculate actual durations based on speed multiplier
+    // Higher speed = lower duration (faster), lower speed = higher duration (slower)
+    frameDuration = Math.round(defaultFrameDuration / animationSpeedMultiplier);
+    moveDuration = Math.round(defaultMoveDuration / animationSpeedMultiplier);
+}
+
+// Listen for settings updates from main process
+ipcRenderer.on('settings-updated', (event, settings) => {
+    applyPetSettings(settings);
+});
+
 // Update API key handler
 ipcRenderer.on('api-key-updated', (event, newKey) => {
     apiKey = newKey;
@@ -130,22 +183,12 @@ ipcRenderer.on('api-key-updated', (event, newKey) => {
 // Request the configuration when the page loads
 ipcRenderer.send('get-character-config', characterName);
 
-// Add this near the start of the file
+// Add this near the start of the file - get initial settings
 ipcRenderer.send('get-settings');
 ipcRenderer.on('settings', (event, settings) => {
-    defaultFrameDuration = settings.defaultFrameDuration;
-    defaultMoveDuration = settings.defaultMoveDuration;
-    frameDuration = defaultFrameDuration;
-    moveDuration = defaultMoveDuration;
+    applyPetSettings(settings);
 });
 
-// Add this event listener
-ipcRenderer.on('settings-updated', (event, settings) => {
-    defaultFrameDuration = settings.defaultFrameDuration;
-    defaultMoveDuration = settings.defaultMoveDuration;
-    frameDuration = defaultFrameDuration;
-    moveDuration = defaultMoveDuration;
-});
 
 function calculateWalkDistance() {
     return Math.floor(Math.random() * (screenWidth / 6)) + Math.floor(screenWidth / 6);
@@ -357,8 +400,26 @@ document.addEventListener("mouseup", () => {
 });
 
 function updatePetPosition() {
-    pet.style.left = `${position.x}px`;
-    pet.style.bottom = `${screenHeight - position.y - petHeight}px`;
+    // Only update DOM if position actually changed
+    if (position.x !== previousPosition.x || position.y !== previousPosition.y) {
+        pet.style.left = `${position.x}px`;
+        pet.style.bottom = `${screenHeight - position.y - petHeight}px`;
+        previousPosition.x = position.x;
+        previousPosition.y = position.y;
+    }
+}
+
+// Optimized transform update - combines with pet size scale
+function setTransform(transform) {
+    // Combine the animation transform with the size scale
+    const combinedTransform = petSizeScale !== 1.0 
+        ? `${transform} scale(${petSizeScale})`
+        : transform;
+    
+    if (combinedTransform !== previousTransform) {
+        pet.style.transform = combinedTransform;
+        previousTransform = combinedTransform;
+    }
 }
 
 function updateAnimation(currentTime) {
@@ -397,22 +458,22 @@ function updateAnimation(currentTime) {
                 if (currentSpecialAction.loop) {
                     specialActionLoopCount++;
                     if (specialActionLoopCount >= currentSpecialAction.loop_times) {
-                        selectAction(); // Return to normal actions
+                        selectAction();
                     } else if (specialActionLoopEndOnly) {
                         // Stay on the last frame
                         frame = frames.length - 1;
                     }
                 } else {
-                    selectAction(); // Return to normal actions
+                    selectAction();
                 }
             } else if (state === 'idleAction' && frame === frames.length - 1) {
                 if (currentIdleAction.loop) {
                     idleActionLoopCount++;
                     if (idleActionLoopCount >= currentIdleAction.loop_times) {
-                        selectAction(); // Return to normal actions
+                        selectAction();
                     }
                 } else {
-                    selectAction(); // Return to normal actions
+                    selectAction();
                 }
             }
         }
@@ -490,7 +551,7 @@ function walkingLeftBottom() {
     if (remainingWalkDistance > 0) {
         position.x -= 1;
         remainingWalkDistance--;
-        pet.style.transform = 'scaleX(1) rotate(0deg)';
+        setTransform('scaleX(1) rotate(0deg)');
     } else {
         selectAction();
     }
@@ -503,7 +564,7 @@ function walkingRightBottom() {
     if (remainingWalkDistance > 0) {
         position.x += 1;
         remainingWalkDistance--;
-        pet.style.transform = 'scaleX(-1) rotate(0deg)';
+        setTransform('scaleX(-1) rotate(0deg)');
     } else {
         selectAction();
     }
@@ -514,7 +575,7 @@ function walkingRightBottom() {
 
 function climbingLeftSidebarUpToDown() {
     position.y += 1;
-    pet.style.transform = 'scaleX(1) rotate(0deg)';
+    setTransform('scaleX(1) rotate(0deg)');
     
     if (!midpointCheckDone && position.y >= screenHeight / 2) {
         midpointCheckDone = true;
@@ -532,7 +593,7 @@ function climbingLeftSidebarUpToDown() {
 
 function climbingLeftSidebarDownToUp() {
     position.y -= 1;
-    pet.style.transform = 'scaleX(1) rotate(0deg)';
+    setTransform('scaleX(1) rotate(0deg)');
     
     if (!midpointCheckDone && position.y <= screenHeight / 2) {
         midpointCheckDone = true;
@@ -550,7 +611,7 @@ function climbingLeftSidebarDownToUp() {
 
 function climbingRightSidebarUpToDown() {
     position.y += 1;
-    pet.style.transform = 'scaleX(-1) rotate(0deg)';
+    setTransform('scaleX(-1) rotate(0deg)');
     
     if (!midpointCheckDone && position.y >= screenHeight / 2) {
         midpointCheckDone = true;
@@ -568,7 +629,7 @@ function climbingRightSidebarUpToDown() {
 
 function climbingRightSidebarDownToUp() {
     position.y -= 1;
-    pet.style.transform = 'scaleX(-1) rotate(0deg)';
+    setTransform('scaleX(-1) rotate(0deg)');
     
     if (!midpointCheckDone && position.y <= screenHeight / 2) {
         midpointCheckDone = true;
@@ -586,7 +647,7 @@ function climbingRightSidebarDownToUp() {
 
 function climbingTopLeft() {
     position.x -= 1;
-    pet.style.transform = 'scaleX(-1) rotate(90deg)';
+    setTransform('scaleX(-1) rotate(90deg)');
     
     if (!midpointCheckDone && position.x <= screenWidth / 2) {
         midpointCheckDone = true;
@@ -604,7 +665,7 @@ function climbingTopLeft() {
 
 function climbingTopRight() {
     position.x += 1;
-    pet.style.transform = 'scaleX(1) rotate(90deg)';
+    setTransform('scaleX(1) rotate(90deg)');
     
     if (!midpointCheckDone && position.x >= screenWidth / 2) {
         midpointCheckDone = true;
@@ -621,15 +682,18 @@ function climbingTopRight() {
 }
 
 function falling() {
-    pet.style.transform = 'scaleX(1) rotate(0deg)';
+    setTransform('scaleX(1) rotate(0deg)');
     velocity.y += gravity;
     velocity.y *= damping;
+    
     position.y += velocity.y;
 
-    if (position.y >= screenHeight - petHeight + 3) {
+    // Check if we've reached the bottom (using pre-calculated landingY)
+    if (position.y >= landingY + 3) {
         if (!fallAnimationStarted) {
             frame = 1;
             fallAnimationStarted = true;
+            position.y = landingY + 3;
         }
         if (frame < fallFrames.length + 1) {
             pet.style.backgroundImage = `url('${fallFrames[frame]}')`;
@@ -650,13 +714,16 @@ function falling() {
     }
 
     if (frame >= fallFrames.length + 1) {
-        position.y = screenHeight - petHeight;
-        if (nextState != ""){
+        position.y = landingY;
+        
+        // Landed on screen bottom
+        if (nextState !== '') {
             state = nextState;
             nextState = '';
-        } else{
+        } else {
             selectAction();
         }
+        
         fallAnimationStarted = false;
         frameDuration = defaultFrameDuration;
         moveDuration = defaultMoveDuration;
@@ -758,14 +825,33 @@ function updatePet(currentTime) {
 
     updateTextBoxPosition();
 
-    requestAnimationFrame(updatePet);
+    animationFrameId = requestAnimationFrame(updatePet);
 }
 
 // Initialize pet position at a random position at the top
 position = { x: Math.random() * (screenWidth - petWidth), y: 0 };
 updatePetPosition();
 
-requestAnimationFrame(updatePet);
+animationFrameId = requestAnimationFrame(updatePet);
+
+// Cleanup function for window unload
+function cleanup() {
+    if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
+    if (responseBoxUpdateInterval) {
+        clearInterval(responseBoxUpdateInterval);
+        responseBoxUpdateInterval = null;
+    }
+    if (responseBoxCheckInterval) {
+        clearInterval(responseBoxCheckInterval);
+        responseBoxCheckInterval = null;
+    }
+}
+
+// Cleanup on window close
+window.addEventListener('beforeunload', cleanup);
 
 function showResponseBox(text) {
     // Append new text to current response
@@ -790,23 +876,27 @@ function showResponseBox(text) {
     // Update text content
     responseBox.textContent = currentResponseText;
     
-    // Update position function
+    // Update position function - cache offsetWidth/Height
     function updateResponseBoxPosition() {
+        if (!responseBox) return;
         const offset = 20;
+        const boxWidth = responseBox.offsetWidth;
+        const boxHeight = responseBox.offsetHeight;
+        
         if (state.includes('climbingTop')) { 
             responseBox.style.left = `${position.x}px`;
             responseBox.style.top = `${position.y + 3*offset}px`;
             responseBox.style.bottom = 'auto';
         } else if (state.includes('climbingLeft')) { 
             responseBox.style.left = `${position.x + offset}px`;
-            responseBox.style.top = `${position.y - 1.3*responseBox.offsetHeight}px`;
+            responseBox.style.top = `${position.y - 1.3*boxHeight}px`;
             responseBox.style.bottom = 'auto';
         } else if (state.includes('climbingRight')) { 
-            responseBox.style.left = `${position.x - responseBox.offsetWidth + 2*offset}px`;
-            responseBox.style.top = `${position.y - (responseBox.offsetHeight/2)}px`;
+            responseBox.style.left = `${position.x - boxWidth + 2*offset}px`;
+            responseBox.style.top = `${position.y - (boxHeight/2)}px`;
             responseBox.style.bottom = 'auto';
         } else {
-            responseBox.style.left = `${position.x - (responseBox.offsetWidth/4)}px`;
+            responseBox.style.left = `${position.x - (boxWidth/4)}px`;
             responseBox.style.bottom = `${screenHeight - position.y + offset/5}px`;
             responseBox.style.top = 'auto';
         }
@@ -815,25 +905,29 @@ function showResponseBox(text) {
     // Initial position
     updateResponseBoxPosition();
 
-    // If not already updating position, start interval
-    if (!this.updateInterval) {
-        this.updateInterval = setInterval(updateResponseBoxPosition, 16);
+    // Clear any existing intervals before creating new ones
+    if (responseBoxUpdateInterval) {
+        clearInterval(responseBoxUpdateInterval);
+    }
+    if (responseBoxCheckInterval) {
+        clearInterval(responseBoxCheckInterval);
     }
 
-    // If not already checking audio state, start interval
-    if (!this.checkInterval) {
-        this.checkInterval = setInterval(() => {
-            if (!isNPCTalking) {
-                clearInterval(this.updateInterval);
-                clearInterval(this.checkInterval);
-                this.updateInterval = null;
-                this.checkInterval = null;
-                if (responseBox && responseBox.parentNode) {
-                    responseBox.parentNode.removeChild(responseBox);
-                    responseBox = null;
-                    currentResponseText = ''; // Reset text for next response
-                }
+    // Start position update interval (use 50ms instead of 16ms - sufficient for text)
+    responseBoxUpdateInterval = setInterval(updateResponseBoxPosition, 50);
+
+    // Check audio state to clean up when done
+    responseBoxCheckInterval = setInterval(() => {
+        if (!isNPCTalking) {
+            clearInterval(responseBoxUpdateInterval);
+            clearInterval(responseBoxCheckInterval);
+            responseBoxUpdateInterval = null;
+            responseBoxCheckInterval = null;
+            if (responseBox && responseBox.parentNode) {
+                responseBox.parentNode.removeChild(responseBox);
+                responseBox = null;
+                currentResponseText = '';
             }
-        }, 100);
-    }
+        }
+    }, 100);
 }
