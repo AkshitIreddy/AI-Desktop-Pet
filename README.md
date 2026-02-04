@@ -35,9 +35,9 @@ Download the pre-built installer for your operating system:
 
 | Platform | Download |
 |----------|----------|
-| 🪟 **Windows** | [Download for Windows](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.0.0-windows) |
-| 🍎 **macOS** | [Download for macOS](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.0.0-macos) |
-| 🐧 **Linux** | [Download for Linux](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.0.0-linux) |
+| 🪟 **Windows** | [Download for Windows](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.1.0-windows) |
+| 🍎 **macOS** | [Download for macOS](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.1.0-macos) |
+| 🐧 **Linux** | [Download for Linux](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.1.0-linux) |
 
 👉 [View All Releases](https://github.com/AkshitIreddy/convai-desktop-pet/releases)
 
