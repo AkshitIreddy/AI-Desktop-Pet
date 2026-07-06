@@ -1,0 +1,454 @@
+﻿{
+  "ayaka": {
+    "displayName": "Ayaka",
+    "convaiId": "d0ad4248-c743-11ef-a477-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 30,
+          "description": "Cherry blossom sitting"
+        },
+        "special_action_2": {
+          "max_frames": 5,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 5,
+          "description": "japanese fan opening"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "albedo": {
+    "displayName": "Albedo",
+    "convaiId": "20f6828c-c744-11ef-aac9-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting on park bench"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "chongyun": {
+    "displayName": "Chongyun",
+    "convaiId": "53456be0-c744-11ef-ae05-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 6,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "magic spell 1"
+        },
+        "special_action_2": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting with sparkles"
+        },
+        "special_action_3": {
+          "max_frames": 5,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "eating ice cream"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "kazuha": {
+    "displayName": "Kazuha",
+    "convaiId": "9d162b38-c744-11ef-92ca-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 2,
+          "loop": true,
+          "loop_times": 20,
+          "description": "blowing leaf whistle"
+        },
+        "special_action_2": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting leg rolling"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "hutao": {
+    "displayName": "Hu Tao",
+    "convaiId": "d50b9ae6-c744-11ef-a7a2-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 8,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "smile"
+        },
+        "special_action_2": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting with magic sparkles"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "klee": {
+    "displayName": "Klee",
+    "convaiId": "0c3ac514-c745-11ef-bcc1-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 4,
+          "loop": true,
+          "loop_times": 20,
+          "description": "fluffy pillow"
+        },
+        "special_action_2": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting on park bench"
+        },
+        "special_action_3": {
+          "max_frames": 5,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "explosion"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "thoma": {
+    "displayName": "Thoma",
+    "convaiId": "331dcc1c-c745-11ef-a7a2-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "eating dumplings"
+        },
+        "special_action_2": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting leg rolling"
+        },
+        "special_action_3": {
+          "max_frames": 5,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "lift puppy"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "venti": {
+    "displayName": "Venti",
+    "convaiId": "7efa6690-c745-11ef-98ee-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 4,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "playing music"
+        },
+        "special_action_2": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting and singing"
+        },
+        "special_action_3": {
+          "max_frames": 5,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 3,
+          "description": "happy fist pump"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "deadpool": {
+    "displayName": "Deadpool",
+    "convaiId": "cd821fec-c745-11ef-af84-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 5,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 2,
+          "loop": true,
+          "loop_times": 5,
+          "description": "question mark"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "Thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 20,
+          "description": "Sitting"
+        }
+      }
+    }
+  },
+  "spongebob": {
+    "displayName": "SpongeBob",
+    "convaiId": "13de290e-c746-11ef-8edc-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 3,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 5,
+          "description": "maniac eye rolling"
+        },
+        "special_action_2": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 10,
+          "description": "sitting on park bench"
+        },
+        "special_action_3": {
+          "max_frames": 4,
+          "loop": true,
+          "loop_end_only": true,
+          "loop_times": 5,
+          "description": "rips himself in half"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 5,
+          "description": "thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "sitting"
+        }
+      }
+    }
+  },
+  "cartman": {
+    "displayName": "South Park Cartman",
+    "convaiId": "852f2428-c746-11ef-9c0f-42010a7be016",
+    "animation": {
+      "walk_max_frame": 3,
+      "drag_max_frames": 6,
+      "fall_max_frames": 5,
+      "climb_max_frames": 3,
+      "special_actions": {
+        "special_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 20,
+          "description": "kyle"
+        },
+        "special_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 20,
+          "description": "kfc"
+        },
+        "special_action_3": {
+          "max_frames": 3,
+          "loop": true,
+          "loop_times": 20,
+          "description": "sitting on park bench"
+        }
+      },
+      "idle_actions": {
+        "idle_action_1": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "thinking"
+        },
+        "idle_action_2": {
+          "max_frames": 1,
+          "loop": true,
+          "loop_times": 10,
+          "description": "sitting"
+        }
+      }
+    }
+  }
+}

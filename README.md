@@ -1,130 +1,113 @@
-# 🎮 Convai Desktop Pet
+# 🎮 Convai Desktop Pets
 
-> **Bring adorable AI-powered companions to your desktop!**
+> **Bring adorable AI-powered companions to your desktop — now alive like never before.**
 
-Transform your desktop into a lively space with cute animated characters that walk, climb, and chat with you using the power of [Convai](https://convai.com).
+Tiny animated characters that walk your taskbar, climb your windows, chase your cursor, befriend each other, remember you, and hold real spoken conversations — powered by [Convai](https://convai.com).
 
-![Convai Desktop Pet Screenshot](screenshot.png)
+[![Latest release](https://img.shields.io/github/v/release/AkshitIreddy/convai-desktop-pet?label=release&color=ec4899)](https://github.com/AkshitIreddy/convai-desktop-pet/releases/latest)
+[![License](https://img.shields.io/badge/license-see%20licenses%2F-8b5cf6)](./licenses)
+[![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)](https://tauri.app)
 
----
-
-## ✨ What is Convai Desktop Pet?
-
-Convai Desktop Pet is a fun desktop companion app that brings **animated chibi-style characters** to life on your screen. These little friends don't just sit there — they **walk around**, **climb your windows**, **fall with gravity**, and best of all, you can **have real conversations** with them using AI!
-
-Whether you want a cute Genshin Impact character hanging out on your taskbar or a mischievous Cartman roaming your desktop, this app has you covered.
+<!-- 📸 TODO(Akshit): screenshot — hero desktop shot: several pets walking on windows/taskbar with a speech bubble visible -->
 
 ---
 
-## 🚀 Features
+## ✨ What's new in 2.0
 
-| Feature | Description |
-|---------|-------------|
-| 🎭 **Multiple Characters** | Choose from a variety of adorable characters including Ayaka, Albedo, Chongyun, Kazuha, Hutao, Klee, Thoma, Venti, Deadpool, Spongebob, Cartman, and more! |
-| 🤖 **AI Conversations** | Chat with your pet using Convai's powerful AI — they'll respond with voice and text! |
-| 🚶 **Living Animations** | Watch them walk, climb edges, fall, get dragged, and perform special idle animations |
-| 🖱️ **Interactive** | Drag your pets around the screen and watch them react |
-| ⚙️ **Customizable** | Link your own Convai characters with custom personalities |
-| 🖥️ **Cross-Platform** | Works on Windows, macOS, and Linux |
+Version 2.0 is a **complete rewrite** — same soul, entirely new body.
 
----
+- ⚡ **Tauri instead of Electron** — roughly **10× lighter**. One transparent overlay window hosts *all* pets (v1 spawned a full Chromium window per pet), with native Rust handling screen capture, window tracking, and cursor polling.
+- 🗣️ **Convai Web SDK 1.6 (beta)** — realtime WebRTC voice conversations, streaming text chat, and dynamic context so characters know what's happening on your desktop.
+- 👀 **Screen vision with timed permission grants** — let a character see your screen for a few minutes (countdown badge, auto-revoke, one-shot "take a look"), then it's blind again. Frames are never stored.
+- 🧠 **Long-term memory (opt-in)** — characters can remember you across sessions, with an in-app memory journal to browse and delete what they know.
+- 🎡 **Radial skill wheel** — click a pet for its wheel of 8 skills, chosen per character from a catalog of **22**: voice, vision, reminders, focus timer, dance party, whisper mode, and more.
+- 🐾 **20 ambient behaviors** — including **walking on your app windows**, sitting on window sills, peeking from behind windows, cursor chasing/watching, and **multi-pet friendships**: side-by-side strolls, meet-and-greets, follow-the-leader, mirror dances, taskbar parades.
+- ⏰ **Reminders & sticky notes** — your character confirms a reminder when you set it and announces it (voice + native notification) when it's due.
+- 🎨 **18 customization options** — themes, accent colors, pet size/opacity, activity level, speech bubble styles, synthesized sound packs, quiet hours, and more.
+- 📖 **In-app documentation** — a full illustrated guide lives right inside the dashboard.
 
-## 📥 Installation
-
-Download the pre-built installer for your operating system:
-
-| Platform | Download |
-|----------|----------|
-| 🪟 **Windows** | [Download for Windows](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.1.0-windows) |
-| 🍎 **macOS** | [Download for macOS](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.1.0-macos) |
-| 🐧 **Linux** | [Download for Linux](https://github.com/AkshitIreddy/convai-desktop-pet/releases/tag/release-v1.1.0-linux) |
-
-👉 [View All Releases](https://github.com/AkshitIreddy/convai-desktop-pet/releases)
-
-### Quick Install Steps:
-1. Download the installer for your OS from the links above
-2. Run the installer
-3. Launch **Convai Desktop Pet**
-4. Set your API key by clicking on the key icon in the top right corner of the app
-5. Select your characters and watch them come to life! 🎉
+<!-- 📸 TODO(Akshit): screenshot — dashboard characters page -->
 
 ---
 
-## 🎮 How to Use
+## 📥 Download
 
-### Spawning Characters
-1. Open the app and go to the **Characters** tab
-2. Check the **Active** box next to any character you want to spawn
-3. Watch them appear on your desktop and start exploring!
+Grab the installer for your OS from the **[latest release](https://github.com/AkshitIreddy/convai-desktop-pet/releases/latest)** — one release, every platform:
 
-### Talking to Your Pet 💬
-Want to have a conversation with your desktop companion?
+| Platform | File |
+|----------|------|
+| 🪟 **Windows** | `Convai-Desktop-Pets_x.x.x_x64-setup.exe` (NSIS installer) |
+| 🍎 **macOS** | `Convai-Desktop-Pets_x.x.x.dmg` (Apple Silicon & Intel builds) |
+| 🐧 **Linux** | `.deb` package or `.AppImage` |
 
-1. Hold down the **`Alt`** key
-2. **Click** on your pet character
-3. A text box will appear — type your message!
-4. Hit the submit button and listen to them respond with AI-powered voice and text
-
-### Dragging Your Pet
-- Simply **click and drag** your pet to move them anywhere on screen
-- Let go and watch them fall with realistic physics!
-
-### Customizing Your Character's Voice & Personality 🎭
-Want to give your pet a unique personality and voice? You can customize each character!
-
-1. Go to **Settings** in the app
-2. Enter your **Convai API Key** (get one free at [convai.com](https://convai.com))
-3. Go to **Convai Character Customization**
-4. Click the edit icon on any character to set a custom **Character ID**
-5. Now your pet has a unique AI personality and voice!
-
-**Note:** You can create custom characters on the [Convai platform](https://convai.com) with different:
-- 🗣️ Voice styles and accents
-- 🧠 Personalities and backstories
-- 💬 Conversation styles and knowledge
+👉 [View all releases](https://github.com/AkshitIreddy/convai-desktop-pet/releases)
 
 ---
 
-## 🎨 Available Characters
+## 🚀 Quick start
+
+1. **Install and launch** — the dashboard opens; the pet overlay starts quietly in your tray.
+2. **Connect Convai** — sign in at [convai.com](https://convai.com), copy your API key from the dashboard (shield icon, top right), and paste it into **Settings → Connection**.
+3. **Spawn a character** — flip the **Active** toggle on the Characters page and watch them drop onto your desktop.
+4. **Say hello** — click a pet for its skill wheel, or **Alt+click** to chat right away.
+5. **Make it yours** — per-character skills, voices, free will, memory; global settings for everything else. The in-app **Docs** page covers it all.
+
+---
+
+## 🎮 How to use
+
+- **Click a pet** → its radial **skill wheel** opens (even mid-walk). Pick from chat, voice, screen vision, reminders, tricks, and more.
+- **Alt+click a pet** → jump straight into a **chat panel** — type, or toggle the mic and just talk.
+- **Drag & throw** → grab a pet, fling it, and watch it tumble with real momentum. Throw too hard and it gets dizzy.
+- Everywhere you're *not* touching a pet, clicks pass straight through to your apps — pets never get in the way.
+
+<!-- 📸 TODO(Akshit): screenshot — skill wheel closeup around a pet -->
+
+<!-- 📸 TODO(Akshit): screenshot — chat panel conversation with a pet -->
+
+---
+
+## 🧠 A note on long-term memory
+
+Long-term memory is **off by default** for every character. Turning it on requires two things:
+
+1. **Enable it in the Convai dashboard** for that character (character → Memory tab → Memory Settings → Enable Long Term Memory).
+2. **A Convai plan with memory allowance** — remembered-user and interaction limits vary by tier; check [convai.com/pricing](https://convai.com/pricing) for current numbers.
+
+The bundled default character IDs ship **without** LTM enabled on the Convai side, so memory features won't work out of the box until you point a character at your own LTM-enabled Convai character.
+
+<!-- TODO(Akshit): once an LTM-enabled public character exists, set DEFAULT_LTM_CHARACTER_ID in src/shared/constants.ts so first-run users can try memory features immediately. -->
+
+Full details — including the end-user ID and the memory journal — are in the in-app Docs.
+
+---
+
+## 🎨 Available characters
 
 | Genshin Impact | Others |
 |----------------|--------|
 | Ayaka | Deadpool |
-| Albedo | Spongebob |
+| Albedo | SpongeBob |
 | Chongyun | Cartman |
 | Kazuha | |
-| Hutao | |
+| Hu Tao | |
 | Klee | |
 | Thoma | |
 | Venti | |
 
-Each character has unique animations including:
-- 🚶 Walking
-- 🧗 Climbing
-- 🪂 Falling
-- 🖐️ Being dragged
-- 💤 Idle poses
-- ⭐ Special actions
+Every character can be re-pointed at any Convai character you create — custom personality, backstory, and voice.
 
 ---
 
-## 🛠️ For Developers
+## 🛠️ Build from source
 
-Want to build from source or contribute?
+See **[BUILDING.md](./BUILDING.md)** for prerequisites, dev workflow, and the release process. The design document lives at [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ```bash
-# Clone the repository
 git clone https://github.com/AkshitIreddy/convai-desktop-pet.git
-
-# Install dependencies
 cd convai-desktop-pet
 npm install
-
-# Run in development mode
-npm start
-
-# Build for production
-npm run build
+npm run tauri dev
 ```
 
 ---
@@ -157,8 +140,9 @@ Want more shimejis? Check out the [Shimejis Directory](https://shimejis.xyz/dire
 - **Nilo J. González** — NimROD Look And Feel (LGPL v3)
 
 ### Technologies
-- [Electron](https://www.electronjs.org/) — Cross-platform desktop framework
+- [Tauri](https://tauri.app) — Lightweight cross-platform desktop framework
 - [Convai](https://convai.com) — AI conversation engine
+- [LiveKit](https://livekit.io) — Realtime WebRTC voice transport (via the Convai Web SDK)
 
 ---
 
@@ -173,4 +157,3 @@ This project includes components under various licenses. See the [licenses](./li
 If you like this project, consider giving it a ⭐ on GitHub!
 
 Made with ❤️ by [AkshitIreddy](https://github.com/AkshitIreddy)
-
