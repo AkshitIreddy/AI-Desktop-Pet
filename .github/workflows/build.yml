@@ -70,6 +70,8 @@ jobs:
             libspa-0.2-dev \
             libwayland-dev \
             libegl1-mesa-dev \
+            libgbm-dev \
+            libdrm-dev \
             libdbus-1-dev \
             libxcb1-dev \
             libxrandr-dev
