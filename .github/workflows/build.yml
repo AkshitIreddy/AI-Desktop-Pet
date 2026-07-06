@@ -1,88 +1,82 @@
-name: Build and Release
+# Release workflow — builds installers for all three OSes with tauri-action and
+# publishes ONE GitHub release containing every platform artifact (v1 shipped
+# three separate per-OS releases; this replaces that).
+#
+# Trigger: push a tag like v2.0.0. Version numbers must already be bumped in
+# package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml (see
+# BUILDING.md → Release process).
+#
+# NOTE: this uses the automatic `secrets.GITHUB_TOKEN` — the old repo-level
+# GH_TOKEN secret from the v1 Electron workflow is no longer needed and can be
+# deleted.
+name: Release
 
 on:
   push:
     tags:
-      - 'v*'  # Triggers on version tags only
+      - 'v*'
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/v')  # Ensure it only runs for version tags
-
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          - platform: macos-latest # Apple Silicon
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest # Intel
+            args: '--target x86_64-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+    runs-on: ${{ matrix.platform }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20.11.1'
+          node-version: 20
+          cache: npm
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build the app
-        run: npm run build -- --publish never
-
-      - name: Create Windows Release
-        uses: softprops/action-gh-release@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          tag_name: release-${{ github.ref_name }}-windows
-          name: Release ${{ github.ref_name }} for Windows
-          files: dist/*.exe
-          token: ${{ secrets.GH_TOKEN }}
+          # Cross-compilation targets are only needed on the macOS runners.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-  build-macos:
-    runs-on: macos-latest
-    if: startsWith(github.ref, 'refs/tags/v')  # Ensure it only runs for version tags
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
+      - uses: swatinem/rust-cache@v2
         with:
-          node-version: '20.11.1'
+          workspaces: src-tauri
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libasound2-dev
 
-      - name: Build the app
-        run: npm run build -- --publish never
+      - name: Install frontend dependencies
+        run: npm ci
 
-      - name: Create macOS Release
-        uses: softprops/action-gh-release@v1
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: release-${{ github.ref_name }}-macos
-          name: Release ${{ github.ref_name }} for macOS
-          files: dist/*.dmg
-          token: ${{ secrets.GH_TOKEN }}
-
-  build-linux:
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')  # Ensure it only runs for version tags
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
-        with:
-          node-version: '20.11.1'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build the app
-        run: npm run build -- --publish never
-
-      - name: Create Linux Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: release-${{ github.ref_name }}-linux
-          name: Release ${{ github.ref_name }} for Linux
-          files: dist/*.deb
-          token: ${{ secrets.GH_TOKEN }}
+          # __VERSION__ is replaced by tauri-action with the app version from
+          # tauri.conf.json — all four matrix jobs upload into this one release.
+          tagName: v__VERSION__
+          releaseName: 'Convai Desktop Pets v__VERSION__'
+          releaseBody: >
+            AI-powered desktop companions built with Tauri and Convai.
+            See the [README](https://github.com/AkshitIreddy/convai-desktop-pet#readme)
+            for what's inside, then download the installer for your OS below
+            (Windows: .exe · macOS: .dmg · Linux: .deb / .AppImage).
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
