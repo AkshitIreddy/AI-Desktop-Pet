@@ -30,7 +30,9 @@ jobs:
             args: '--target aarch64-apple-darwin'
           - platform: macos-latest # Intel
             args: '--target x86_64-apple-darwin'
-          - platform: ubuntu-22.04
+          # 24.04, not 22.04: xcap's libspa bindings need PipeWire >= 1.0
+          # headers (22.04 ships 0.3.48, which no longer matches the crate).
+          - platform: ubuntu-24.04
             args: ''
     runs-on: ${{ matrix.platform }}
     steps:
@@ -51,16 +53,18 @@ jobs:
           workspaces: src-tauri
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu')
         # Beyond the standard Tauri set: xcap (native screen capture for the
         # vision feature) builds against PipeWire/Wayland/EGL/DBus dev libs.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
+            libxdo-dev \
+            libssl-dev \
             libasound2-dev \
             libpipewire-0.3-dev \
             libspa-0.2-dev \
