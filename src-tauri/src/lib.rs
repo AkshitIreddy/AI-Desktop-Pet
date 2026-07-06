@@ -6,10 +6,10 @@ mod win_info;
 use serde::Serialize;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use tauri_plugin_autostart::MacosLauncher;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkArea {
     pub x: i32,
@@ -60,13 +60,15 @@ fn primary_work_area(app: &AppHandle) -> Result<WorkArea, String> {
             .primary_monitor()
             .map_err(|e| e.to_string())?
             .ok_or("no primary monitor")?;
-        let pos = monitor.position();
-        let size = monitor.size();
+        // Actual work area (NSScreen.visibleFrame / _NET_WORKAREA), not the
+        // full monitor bounds, so the overlay never covers the dock/panel.
+        // Same 2px height shave as the Windows branch (see comment above).
+        let wa = monitor.work_area();
         Ok(WorkArea {
-            x: pos.x,
-            y: pos.y,
-            w: size.width,
-            h: size.height,
+            x: wa.position.x,
+            y: wa.position.y,
+            w: wa.size.width,
+            h: wa.size.height.saturating_sub(2),
             scale,
         })
     }
@@ -145,6 +147,20 @@ fn setup_overlay(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Re-applies overlay geometry after the work area changed (resolution, DPI,
+/// or taskbar move — detected by the cursor poll loop) and tells the overlay
+/// webview about the fresh work area. Mirrors setup_overlay's positioning,
+/// including the sandbox off-screen offset.
+fn resync_overlay(app: &AppHandle, area: WorkArea) {
+    let sandbox = sandbox_mode();
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let x = if sandbox { area.x - 30000 } else { area.x };
+        let _ = overlay.set_position(PhysicalPosition::new(x, area.y));
+        let _ = overlay.set_size(PhysicalSize::new(area.w, area.h));
+    }
+    let _ = app.emit_to("overlay", "work-area-changed", area);
+}
+
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
@@ -190,6 +206,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             overlay::update_hit_regions,
             overlay::set_overlay_focusable,
+            overlay::set_cursor_stream,
             overlay::overlay_ready,
             overlay::get_cursor_pos,
             overlay::debug_overlay_state,

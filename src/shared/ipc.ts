@@ -32,6 +32,9 @@ export const ipc = {
   captureScreen: (maxDim = 1280, quality = 70) =>
     invoke<CaptureResult>('capture_screen', { maxDim, quality }),
   getWorkArea: () => invoke<WorkArea>('get_work_area'),
+  /** Gate the ~30 Hz cursor-pos emit; off while no pets are spawned. */
+  setCursorStream: (enabled: boolean) =>
+    invoke<void>('set_cursor_stream', { enabled }),
   showMainWindow: () => invoke<void>('show_main_window'),
   /** Old Electron install's config.json contents, or null. */
   readLegacyConfig: () =>
@@ -42,6 +45,11 @@ export const ipc = {
 
 export const onCursorPos = (cb: (pos: CursorPos) => void): Promise<UnlistenFn> =>
   listen<CursorPos>(EVT_CURSOR, (e) => cb(e.payload));
+
+/** Rust re-emits the primary work area on display/DPI/taskbar changes. */
+export const onWorkAreaChanged = (
+  cb: (area: WorkArea) => void,
+): Promise<UnlistenFn> => listen<WorkArea>('work-area-changed', (e) => cb(e.payload));
 
 export const notifySettingsChanged = (settings: AppSettings) =>
   emitTo('overlay', EVT_SETTINGS_CHANGED, settings);

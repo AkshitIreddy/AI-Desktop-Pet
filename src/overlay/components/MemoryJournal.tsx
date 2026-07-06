@@ -63,12 +63,15 @@ export function MemoryJournal({ petName }: { petName: string }) {
 
   useEffect(() => {
     hitRegionRegistry.set('journal', { x: pos.x, y: pos.y, w: W, h: H });
+    // Focus lease so the non-focusable overlay actually receives Escape.
+    const release = runtime.acquireFocus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') overlayUi.closeMemoryJournal();
     };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
+      release();
       hitRegionRegistry.set('journal', null);
     };
   }, [pos]);

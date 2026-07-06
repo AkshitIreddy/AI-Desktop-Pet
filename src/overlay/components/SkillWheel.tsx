@@ -102,7 +102,11 @@ export function SkillWheel({ petName }: { petName: string }) {
 
   // Escape closes; clicks elsewhere in the webview close too (pets excluded —
   // their own click handler decides whether to toggle or move the wheel).
+  // The wheel holds a focus lease while open so keydown is actually delivered
+  // (the overlay is non-focusable at rest); losing focus — clicking the desktop
+  // or another app — counts as click-out and dismisses the wheel.
   useEffect(() => {
+    const release = runtime.acquireFocus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') overlayUi.closeWheel();
     };
@@ -113,11 +117,15 @@ export function SkillWheel({ petName }: { petName: string }) {
       if (t.closest('.pet')) return;
       overlayUi.closeWheel();
     };
+    const onBlur = () => overlayUi.closeWheel();
     window.addEventListener('keydown', onKey);
     window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('blur', onBlur);
+      release();
     };
   }, []);
 

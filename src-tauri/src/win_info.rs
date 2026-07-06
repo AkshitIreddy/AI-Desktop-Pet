@@ -22,7 +22,7 @@ pub struct WinRect {
 }
 
 #[tauri::command]
-pub fn list_windows() -> Vec<NativeWindow> {
+pub async fn list_windows() -> Vec<NativeWindow> {
     #[cfg(windows)]
     {
         collect_windows()

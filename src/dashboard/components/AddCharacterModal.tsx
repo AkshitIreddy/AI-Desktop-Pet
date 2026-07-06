@@ -59,10 +59,10 @@ export function AddCharacterModal(props: { open: boolean; onClose: () => void })
 
   const idInvalid = !!convaiId.trim() && !CONVAI_ID_RE.test(convaiId.trim());
   const canNext =
-    step === 0 ? sprite !== null : step === 1 ? !!displayName.trim() : true;
+    step === 0 ? sprite !== null : step === 1 ? !!displayName.trim() && !idInvalid : true;
 
   const finish = async () => {
-    if (!sprite || busy) return;
+    if (!sprite || busy || idInvalid) return;
     setBusy(true);
     try {
       await addCharacter(

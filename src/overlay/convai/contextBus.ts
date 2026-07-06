@@ -29,6 +29,8 @@ export interface ContextBusDeps {
   peers(): ContextPeer[];
   /** Number of live Convai connections right now (GAP 7 cap awareness). */
   liveCount(): number;
+  /** Mid-crosstalk — an ambient nudge's reply would be captured as a crosstalk turn. */
+  isBusy(name: string): boolean;
 }
 
 export interface ContextBus {
@@ -169,8 +171,15 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
     if (intervalMin === null) return;
     const now = Date.now();
     for (const peer of deps.peers()) {
-      if (!peer.freeWill() || !peer.spawned()) continue;
-      const due = nextNudgeAt.get(peer.name) ?? 0;
+      if (!peer.freeWill() || !peer.spawned() || deps.isBusy(peer.name)) continue;
+      const due = nextNudgeAt.get(peer.name);
+      if (due === undefined) {
+        // First encounter — seed the schedule so the first ambient nudge
+        // waits one full (jittered) interval after boot instead of firing now.
+        const seedJitter = 0.75 + Math.random() * 0.5;
+        nextNudgeAt.set(peer.name, now + intervalMin * 60_000 * seedJitter);
+        continue;
+      }
       if (now < due) continue;
       const jitter = 0.75 + Math.random() * 0.5;
       nextNudgeAt.set(peer.name, now + intervalMin * 60_000 * jitter);

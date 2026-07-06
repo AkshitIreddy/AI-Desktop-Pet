@@ -49,6 +49,10 @@ pub struct OverlayState {
     /// Whether a text input (chat, composer) currently holds keyboard focus.
     /// Affects focusability only — NEVER whole-window mouse interactivity.
     focus_held: AtomicBool,
+    /// Whether the ~30 Hz `cursor-pos` stream should be emitted to the overlay
+    /// webview. Off while no pets are spawned so an idle overlay gets no
+    /// webview wakeups; click-through toggling is never gated by this.
+    cursor_stream: AtomicBool,
     poll_started: AtomicBool,
 }
 
@@ -70,10 +74,26 @@ pub async fn set_overlay_focusable(
     state.focus_held.store(focusable, Ordering::Relaxed);
     if let Some(overlay) = app.get_webview_window("overlay") {
         overlay.set_focusable(focusable).map_err(|e| e.to_string())?;
+        // tao's set_focusable rewrites GWL_EXSTYLE wholesale and can clobber
+        // WS_EX_TRANSPARENT; re-assert click-through immediately so the
+        // overlay matches `interactive` now rather than one poll tick later.
+        #[cfg(windows)]
+        if let Ok(hwnd) = overlay.hwnd() {
+            set_click_through(hwnd.0 as isize, !state.interactive.load(Ordering::Relaxed));
+        }
         if focusable {
             let _ = overlay.set_focus();
         }
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_cursor_stream(
+    state: State<'_, OverlayState>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.cursor_stream.store(enabled, Ordering::Relaxed);
     Ok(())
 }
 
@@ -145,9 +165,25 @@ fn set_click_through(hwnd: isize, ignore: bool) -> bool {
     }
 }
 
+/// Reads the LIVE `WS_EX_TRANSPARENT` bit. The poll loop reconciles against
+/// this instead of the cached `interactive` flag: other style writers (tao's
+/// `set_focusable`, `set_ignore_cursor_events`) do their own read-modify-write
+/// of `GWL_EXSTYLE` and can silently clobber the bit, so trusting the cache
+/// could leave the overlay stuck opaque or click-through.
+#[cfg(windows)]
+fn is_interactive(hwnd: isize) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TRANSPARENT,
+    };
+    let ex = unsafe { GetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE) };
+    ex & (WS_EX_TRANSPARENT.0 as isize) == 0
+}
+
 fn cursor_poll_loop(app: AppHandle) {
     let mut tick: u64 = 0;
     let mut last_emitted = (f64::MIN, f64::MIN);
+    let mut last_area = crate::primary_work_area(&app).ok();
 
     #[cfg(windows)]
     let overlay_hwnd: Option<isize> = app
@@ -158,6 +194,20 @@ fn cursor_poll_loop(app: AppHandle) {
     loop {
         std::thread::sleep(std::time::Duration::from_millis(16));
         tick = tick.wrapping_add(1);
+
+        // ~2 s: detect work-area changes (resolution, DPI, taskbar move) and
+        // resync overlay geometry + notify the webview.
+        if tick % 128 == 0 {
+            if let Ok(area) = crate::primary_work_area(&app) {
+                if last_area != Some(area) {
+                    last_area = Some(area);
+                    let handle = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        crate::resync_overlay(&handle, area);
+                    });
+                }
+            }
+        }
 
         let state = app.state::<OverlayState>();
         let Ok(pos) = app.cursor_position() else {
@@ -170,6 +220,15 @@ fn cursor_poll_loop(app: AppHandle) {
             Ok(regions) => regions.iter().any(|r| r.contains(pos.x, pos.y)),
             Err(_) => continue,
         };
+        // On Windows, reconcile against the live window style rather than the
+        // cached flag so any clobbered WS_EX_TRANSPARENT bit is detected and
+        // corrected within one tick (see is_interactive).
+        #[cfg(windows)]
+        let current = overlay_hwnd.map_or_else(
+            || state.interactive.load(Ordering::Relaxed),
+            is_interactive,
+        );
+        #[cfg(not(windows))]
         let current = state.interactive.load(Ordering::Relaxed);
 
         if inside != current {
@@ -191,8 +250,12 @@ fn cursor_poll_loop(app: AppHandle) {
             }
         }
 
-        // ~30 Hz cursor stream for follow/watch behaviors, only on movement.
-        if tick % 2 == 0 && (pos.x, pos.y) != last_emitted {
+        // ~30 Hz cursor stream for follow/watch behaviors, only on movement
+        // and only while the frontend has pets that want it (set_cursor_stream).
+        if state.cursor_stream.load(Ordering::Relaxed)
+            && tick % 2 == 0
+            && (pos.x, pos.y) != last_emitted
+        {
             last_emitted = (pos.x, pos.y);
             let _ = app.emit_to(
                 "overlay",

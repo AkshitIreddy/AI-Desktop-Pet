@@ -39,11 +39,25 @@ export function PetLayer() {
       dragging: false,
       samples: [{ x: e.clientX, y: e.clientY, t: performance.now() }],
     });
+    // Capture immediately so up/cancel always land on this element even if
+    // the pet walks away or the cursor leaves — a Track can never go stale.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer already gone (pen lift / synthetic events) — the buttons
+      // check in onMove keeps the track from going phantom.
+    }
   };
 
   const onMove = (name: string, e: React.PointerEvent<HTMLDivElement>) => {
     const t = tracks.get(name);
     if (!t || t.pointerId !== e.pointerId) return;
+    // Defense-in-depth: if the button is no longer down and we never started
+    // dragging, the track is stale — drop it instead of starting a phantom drag.
+    if (!t.dragging && (e.buttons & 1) === 0) {
+      tracks.delete(name);
+      return;
+    }
     t.samples.push({ x: e.clientX, y: e.clientY, t: performance.now() });
     if (t.samples.length > 4) t.samples.shift();
     if (!t.dragging) {
@@ -51,9 +65,7 @@ export function PetLayer() {
       t.dragging = true;
       runtime.director.beginDrag(name);
       runtime.setSuspendKey(`drag:${name}`, true);
-      const el = e.currentTarget;
-      el.setPointerCapture(e.pointerId);
-      el.dataset.dragging = 'true';
+      e.currentTarget.dataset.dragging = 'true';
     }
     runtime.director.dragTo(name, e.clientX - t.grabDX, e.clientY - t.grabDY);
   };

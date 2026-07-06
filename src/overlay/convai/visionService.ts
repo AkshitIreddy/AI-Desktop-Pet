@@ -51,14 +51,22 @@ export function createVisionService(host: VisionHost): VisionService {
   let canvas: HTMLCanvasElement | null = null;
   let handle: VisionSourceHandle | null = null;
   let active = false;
-  let inFlight = false;
+  let inFlight: Promise<void> | null = null;
   let loop: ReturnType<typeof setInterval> | null = null;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
   let expiresAt = 0;
 
-  async function drawFrame(): Promise<boolean> {
-    if (inFlight || canvas === null) return false;
-    inFlight = true;
+  async function drawFrame(force = false): Promise<boolean> {
+    while (inFlight !== null) {
+      if (!force) return false; // loop tick: coalesce with the running capture
+      await inFlight; // mandatory frame (grant/lookOnce): wait out the stale one
+    }
+    if (canvas === null) return false;
+    let done!: () => void;
+    const mine = new Promise<void>((r) => {
+      done = r;
+    });
+    inFlight = mine;
     try {
       const cap = await ipc.captureScreen(CAPTURE_MAX_DIM, CAPTURE_QUALITY);
       const img = await loadImage(`data:image/jpeg;base64,${cap.base64Jpeg}`);
@@ -73,7 +81,8 @@ export function createVisionService(host: VisionHost): VisionService {
     } catch {
       return false; // skip the frame; the previous one stays published
     } finally {
-      inFlight = false;
+      done();
+      if (inFlight === mine) inFlight = null;
     }
   }
 
@@ -116,7 +125,7 @@ export function createVisionService(host: VisionHost): VisionService {
     const client = host.client();
     if (client === null) throw new Error('Not connected — try again.');
     canvas = document.createElement('canvas');
-    const ok = await drawFrame();
+    const ok = await drawFrame(true);
     if (!ok || canvas.width === 0) {
       canvas = null;
       throw new Error('Screen capture failed — try again.');
@@ -158,7 +167,7 @@ export function createVisionService(host: VisionHost): VisionService {
     const client = host.client();
     if (client === null) throw new Error('Not connected — try again.');
     canvas = document.createElement('canvas');
-    const ok = await drawFrame();
+    const ok = await drawFrame(true);
     if (!ok || canvas.width === 0) {
       canvas = null;
       throw new Error('Screen capture failed — try again.');

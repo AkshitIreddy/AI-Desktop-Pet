@@ -1,6 +1,8 @@
 /**
  * OnboardingModal — 4-step first-run tour. Shown while
- * settings.showOnboarding is true; Finish persists it off.
+ * settings.showOnboarding is true; only Finish (and Docs) persist it off.
+ * Esc/backdrop dismissal is session-local (onDismiss) so an accidental
+ * keypress doesn't kill the tour for good.
  */
 import { AnimatePresence, motion } from 'framer-motion';
 import { useId, useState, type CSSProperties } from 'react';
@@ -12,7 +14,10 @@ import { ModalShell } from './controls';
 
 const STEP_COUNT = 4;
 
-export function OnboardingModal(props: { onOpenDocs: () => void }) {
+export function OnboardingModal(props: {
+  onOpenDocs: () => void;
+  onDismiss: () => void;
+}) {
   const settings = useDashboard((s) => s.settings);
   const characters = useDashboard((s) => s.characters);
   const saveSettings = useDashboard((s) => s.saveSettings);
@@ -43,7 +48,16 @@ export function OnboardingModal(props: { onOpenDocs: () => void }) {
   };
 
   return (
-    <ModalShell onClose={() => void finish()} width={640} labelledBy={titleId}>
+    <ModalShell
+      onClose={() => {
+        // Session-local dismissal: keep any typed key, but don't persist
+        // showOnboarding off — the tour returns on next launch.
+        void persistKey();
+        props.onDismiss();
+      }}
+      width={640}
+      labelledBy={titleId}
+    >
       <div className="cdp-onb">
         <AnimatePresence mode="wait">
           <motion.div

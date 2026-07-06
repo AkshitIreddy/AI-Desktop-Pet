@@ -32,29 +32,25 @@ export function SettingsPage() {
   const saveDebounced = useDashboard((st) => st.saveSettingsDebounced);
   const toast = useDashboard((st) => st.toast);
   const regenerateEndUserId = useDashboard((st) => st.regenerateEndUserId);
+  const setTourHidden = useDashboard((st) => st.setTourHidden);
 
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [confirmRegen, setConfirmRegen] = useState(false);
   const [autostartBusy, setAutostartBusy] = useState(false);
   const syncedAutostart = useRef(false);
-  const keySavedTimers = useRef<{ show: number | null; hide: number | null }>({
-    show: null,
-    hide: null,
-  });
+  const keySavedHide = useRef<number | null>(null);
 
   const onApiKeyChange = (value: string) => {
-    saveDebounced({ apiKey: value.trim() });
     setKeySaved(false);
-    const t = keySavedTimers.current;
-    if (t.show !== null) window.clearTimeout(t.show);
-    // saveSettingsDebounced flushes after 150ms of quiet; confirm shortly after.
-    t.show = window.setTimeout(() => {
+    // The flash confirms the actual persistence result of the debounced flush.
+    saveDebounced({ apiKey: value.trim() }, (ok) => {
+      if (!ok) return;
       setKeySaved(true);
       sounds.play('select');
-      if (t.hide !== null) window.clearTimeout(t.hide);
-      t.hide = window.setTimeout(() => setKeySaved(false), 2600);
-    }, 650);
+      if (keySavedHide.current !== null) window.clearTimeout(keySavedHide.current);
+      keySavedHide.current = window.setTimeout(() => setKeySaved(false), 2600);
+    });
   };
 
   // Reconcile the stored flag with the OS on first visit.
@@ -501,7 +497,10 @@ export function SettingsPage() {
           <button
             type="button"
             className="cdp-btn cdp-btn-sm"
-            onClick={() => void saveSettings({ showOnboarding: true })}
+            onClick={() => {
+              setTourHidden(false); // clear a session-local Esc dismissal
+              void saveSettings({ showOnboarding: true });
+            }}
           >
             Show onboarding again
           </button>

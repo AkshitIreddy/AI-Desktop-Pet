@@ -31,12 +31,21 @@ interface DashboardState {
   settings: AppSettings;
   characters: Record<string, CharacterRecord>;
   toasts: Toast[];
+  /** Esc/backdrop hid the onboarding tour for this session only. */
+  tourHidden: boolean;
+  setTourHidden(hidden: boolean): void;
 
   init(): Promise<void>;
   /** Persist + applyTheme + notify overlay. Use for discrete controls. */
   saveSettings(patch: Partial<AppSettings>): Promise<void>;
-  /** Optimistic local update, persist/notify debounced 150 ms (sliders). */
-  saveSettingsDebounced(patch: Partial<AppSettings>): void;
+  /**
+   * Optimistic local update, persist/notify debounced 150 ms (sliders).
+   * `onResult` fires once when the pending flush persists (or fails).
+   */
+  saveSettingsDebounced(
+    patch: Partial<AppSettings>,
+    onResult?: (ok: boolean) => void,
+  ): void;
   updateCharacter(
     name: string,
     patch: Partial<Omit<CharacterRecord, 'name'>>,
@@ -74,6 +83,7 @@ function snapshotCharacters(): Record<string, CharacterRecord> {
 
 let toastSeq = 1;
 let pendingPatch: Partial<AppSettings> = {};
+let pendingOnResult: ((ok: boolean) => void) | undefined;
 let debounceTimer: number | undefined;
 
 export const useDashboard = create<DashboardState>((set, get) => ({
@@ -81,9 +91,18 @@ export const useDashboard = create<DashboardState>((set, get) => ({
   settings: { ...DEFAULT_SETTINGS },
   characters: {},
   toasts: [],
+  tourHidden: false,
+
+  setTourHidden(hidden) {
+    set({ tourHidden: hidden });
+  },
 
   async init() {
-    const state = await appStore.load();
+    // TODO(integrator): drop the cast once shared/store.ts lands
+    // `load(opts?: { init?: boolean })` — the dashboard is the first-run owner.
+    const state = await (
+      appStore.load as (opts?: { init?: boolean }) => ReturnType<typeof appStore.load>
+    )({ init: true });
     applySettingsSideEffects(state.settings);
     set({
       ready: true,
@@ -93,25 +112,51 @@ export const useDashboard = create<DashboardState>((set, get) => ({
   },
 
   async saveSettings(patch) {
-    const settings = await appStore.saveSettings(patch);
-    applySettingsSideEffects(settings);
-    set({ settings: { ...settings } });
-    await notifySettingsChanged(settings);
+    // Absorb any pending debounced patch atomically so this write never
+    // reverts optimistic slider edits and the (cancelled) flush can't diverge.
+    window.clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+    const merged = { ...pendingPatch, ...patch };
+    const report = pendingOnResult;
+    pendingPatch = {};
+    pendingOnResult = undefined;
+    try {
+      const settings = await appStore.saveSettings(merged);
+      applySettingsSideEffects(settings);
+      set({ settings: { ...settings } });
+      report?.(true);
+      await notifySettingsChanged(settings);
+    } catch (err) {
+      report?.(false);
+      throw err;
+    }
   },
 
-  saveSettingsDebounced(patch) {
+  saveSettingsDebounced(patch, onResult) {
     pendingPatch = { ...pendingPatch, ...patch };
+    if (onResult) pendingOnResult = onResult;
     const next = { ...get().settings, ...patch };
     applySettingsSideEffects(next);
     set({ settings: next });
     window.clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => {
+      debounceTimer = undefined;
       const flush = pendingPatch;
+      const report = pendingOnResult;
       pendingPatch = {};
+      pendingOnResult = undefined;
       void appStore
         .saveSettings(flush)
-        .then((saved) => notifySettingsChanged(saved))
-        .catch(() => get().toast('Could not save settings.', 'error'));
+        .then((saved) => {
+          // Mirror the persisted result, keeping any newer optimistic edits.
+          set({ settings: { ...saved, ...pendingPatch } });
+          report?.(true);
+          return notifySettingsChanged(saved);
+        })
+        .catch(() => {
+          report?.(false);
+          get().toast('Could not save settings.', 'error');
+        });
     }, 150);
   },
 
@@ -162,6 +207,27 @@ export const useDashboard = create<DashboardState>((set, get) => ({
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
 }));
+
+/**
+ * Refresh the zustand mirror from the shared store whenever the dashboard
+ * becomes visible/focused, so overlay-side mutations (freeWill toggles from
+ * the skill wheel, reminders, notes) show up without a restart and editors
+ * never start from stale values.
+ */
+async function refreshFromStore(): Promise<void> {
+  if (!useDashboard.getState().ready) return;
+  await appStore.reload();
+  useDashboard.setState({
+    // Keep any not-yet-flushed optimistic slider edits on top.
+    settings: { ...appStore.state.settings, ...pendingPatch },
+    characters: snapshotCharacters(),
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void refreshFromStore();
+});
+window.addEventListener('focus', () => void refreshFromStore());
 
 /** Sorted, convenient views used by several pages. */
 export function characterList(

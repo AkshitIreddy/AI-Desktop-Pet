@@ -34,9 +34,11 @@ export function NotesBoard() {
     };
   }, []);
 
+  // Layout geometry (pos + offsetHeight) rather than getBoundingClientRect so
+  // the framer-motion entry transform can't shrink/offset the hit region.
   useEffect(() => {
-    const r = ref.current?.getBoundingClientRect();
-    if (r) hitRegionRegistry.set('notes', { x: r.left, y: r.top, w: r.width, h: r.height });
+    const el = ref.current;
+    if (el) hitRegionRegistry.set('notes', { x: pos.x, y: pos.y, w: W, h: el.offsetHeight });
   });
   useEffect(() => () => hitRegionRegistry.set('notes', null), []);
 

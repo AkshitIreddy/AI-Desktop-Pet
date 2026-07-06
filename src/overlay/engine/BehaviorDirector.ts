@@ -71,7 +71,7 @@ class Director implements DirectorLink, DirectorHandle {
   private running = new Map<number, RunningInstance>();
   private skillLoops = new Map<string, SkillLoop>();
   private windowQueue: Platform[] = [];
-  private dizzyQueue: string[] = [];
+  private dizzyQueue: { name: string; at: number }[] = [];
   private overlapSince = new Map<string, number>();
   private suspended = false;
   private seq = 0;
@@ -203,12 +203,20 @@ class Director implements DirectorLink, DirectorHandle {
   /* ---------------------------- reactive triggers ---------------------------- */
 
   private reactives(now: number): void {
-    // dizzy-tumble: thrown hard, now landed
-    while (this.dizzyQueue.length) {
-      const name = this.dizzyQueue.shift();
-      const pet = name ? this.petsMap.get(name) : undefined;
-      if (pet && this.isFree(pet)) this.trigger('dizzy-tumble', pet, undefined, 'dizzy');
-    }
+    // dizzy-tumble: thrown hard, now landed. Entries are retained until the
+    // pet is actually free (landing bounce takes a few ticks) with a short
+    // TTL, and dizzy preempts a follow-cursor claim the way one-shots do —
+    // followLoop re-claims once the reaction finishes.
+    this.dizzyQueue = this.dizzyQueue.filter((q) => {
+      const pet = this.petsMap.get(q.name);
+      if (!pet || now - q.at > 5_000) return false; // despawned or stale — drop
+      const meta = this.metas.get(q.name);
+      const loop = this.skillLoops.get(`${q.name}:follow-cursor`);
+      if (meta && loop && meta.claimedBy === loop.inst) meta.claimedBy = null;
+      if (!this.isFree(pet)) return true; // still bouncing/claimed — retry next tick
+      this.trigger('dizzy-tumble', pet, undefined, 'dizzy');
+      return false;
+    });
 
     // new-window-curiosity: nearest free pet investigates
     if (this.windowQueue.length && this.env.settings.windowWalking) {
@@ -243,9 +251,10 @@ class Director implements DirectorLink, DirectorHandle {
       for (const pet of this.petsMap.values()) {
         const meta = this.metas.get(pet.rec.name);
         if (!meta || meta.periodsDone.has(key) || !this.isFree(pet)) continue;
-        meta.periodsDone.add(key);
-        this.trigger('time-of-day', pet, period, period);
-        break; // one pet per tick; the rest follow on later ticks
+        if (this.trigger('time-of-day', pet, period, period)) {
+          meta.periodsDone.add(key);
+        }
+        break; // one attempt per tick; others retry once the cooldown expires
       }
     }
 
@@ -292,8 +301,14 @@ class Director implements DirectorLink, DirectorHandle {
             const other = later === a ? b : a;
             const meta = this.metas.get(later.rec.name);
             if (meta && this.isFree(later) && now > meta.sidestepAt) {
-              const dir = later.x + later.size / 2 >= other.x + other.size / 2 ? 1 : -1;
-              void later.walkTo(later.x + dir * (60 + Math.random() * 60));
+              let dir = later.x + later.size / 2 >= other.x + other.size / 2 ? 1 : -1;
+              const step = 60 + Math.random() * 60;
+              const maxX = Math.max(0, this.env.width - later.size);
+              // Stacked at a screen edge — step inward instead of into the wall.
+              if ((dir > 0 && later.x + step > maxX) || (dir < 0 && later.x - step < 0)) {
+                dir = -dir;
+              }
+              void later.walkTo(later.x + dir * step);
               meta.sidestepAt = now + SIDESTEP_COOLDOWN_MS;
             }
             this.overlapSince.delete(key);
@@ -351,15 +366,16 @@ class Director implements DirectorLink, DirectorHandle {
     return this.startBehavior(chosen, pet, now);
   }
 
-  private trigger(id: string, pet: Pet, data?: unknown, detail?: string): void {
+  /** Returns true when the behavior actually started. */
+  private trigger(id: string, pet: Pet, data?: unknown, detail?: string): boolean {
     const def = BEHAVIORS_BY_ID.get(id);
-    if (!def) return;
+    if (!def) return false;
     const now = performance.now();
-    if ((this.cooldownUntil.get(id) ?? 0) > now) return;
-    if (def.gatedBy && !this.env.settings[def.gatedBy]) return;
-    if (def.locks.some((l) => this.locks.has(l))) return;
-    if (!this.isFree(pet)) return;
-    this.startBehavior(def, pet, now, data, detail);
+    if ((this.cooldownUntil.get(id) ?? 0) > now) return false;
+    if (def.gatedBy && !this.env.settings[def.gatedBy]) return false;
+    if (def.locks.some((l) => this.locks.has(l))) return false;
+    if (!this.isFree(pet)) return false;
+    return this.startBehavior(def, pet, now, data, detail);
   }
 
   private startBehavior(
@@ -472,7 +488,7 @@ class Director implements DirectorLink, DirectorHandle {
         break;
       case 'teleport-home': {
         this.abortFor(pet);
-        const hx = (pet.rec.homeX ?? 0.82) * this.env.width - pet.size / 2;
+        const hx = (pet.rec.homeX ?? 0.5) * this.env.width - pet.size / 2;
         pet.teleport(hx, this.env.height - pet.size);
         this.emit({ type: 'behavior-start', pet: petName, behavior: 'teleport-home' });
         this.emit({ type: 'behavior-end', pet: petName, behavior: 'teleport-home' });
@@ -611,7 +627,12 @@ class Director implements DirectorLink, DirectorHandle {
     while (!signal.aborted && this.petsMap.has(pet.rec.name) && !pet.hidden) {
       const meta = this.metas.get(pet.rec.name);
       if (meta && meta.claimedBy === null) meta.claimedBy = inst; // re-claim after one-shots
-      if (pet.state === 'dragging' || pet.pinned || !pet.grounded) {
+      if (
+        pet.state === 'dragging' ||
+        pet.state === 'sleeping' ||
+        pet.pinned ||
+        !pet.grounded
+      ) {
         await wait(250, signal);
         continue;
       }
@@ -624,7 +645,9 @@ class Director implements DirectorLink, DirectorHandle {
           dx > 0
             ? Math.min(eased, this.env.cursor.x - 40 - pet.size / 2)
             : Math.max(eased, this.env.cursor.x + 40 + pet.size / 2);
-        await pet.walkTo(stop - pet.size / 2);
+        // A refused walk resolves false synchronously — yield via a real
+        // timer so the loop can never starve the event loop.
+        if (!(await pet.walkTo(stop - pet.size / 2))) await wait(250, signal);
       } else {
         pet.face(dx < 0 ? 'left' : 'right');
         await wait(180, signal);
@@ -731,7 +754,7 @@ class Director implements DirectorLink, DirectorHandle {
       const m = this.metas.get(ev.pet);
       if (m?.pendingDizzy) {
         m.pendingDizzy = false;
-        this.dizzyQueue.push(ev.pet);
+        this.dizzyQueue.push({ name: ev.pet, at: performance.now() });
       }
     }
     this.emit(ev);

@@ -108,6 +108,8 @@ function fallbackRecord(name: string): CharacterRecord {
 interface SessionCtx {
   store: AppStore;
   live: Set<PetSession>;
+  /** Shared connect gate: serializes evict+reserve so concurrent connects respect the cap. */
+  gate: { p: Promise<void> };
   getBus(): ContextBus;
 }
 
@@ -127,13 +129,19 @@ class PetSession implements PetConvai {
   pinned = false;
   /**
    * Some accounts/backends reject video-capable sessions. After one failed
-   * video connect we fall back to audio-only for this session (vision then
-   * reports a friendly error instead of a generic connect failure).
+   * video connect we fall back to audio-only for the rest of this connection
+   * epoch (vision then reports a friendly error instead of a generic connect
+   * failure); a full disconnect/reset re-probes video on the next connect.
    */
   private videoCapable = true;
+  /** Bumped on every client teardown; in-flight connects bail when it moves. */
+  private clientEpoch = 0;
+  /** Set by dispose(); a disposed session must never reconnect. */
+  private disposed = false;
 
   private readonly store: AppStore;
   private readonly live: Set<PetSession>;
+  private readonly gate: { p: Promise<void> };
   private readonly getBus: () => ContextBus;
   private readonly vision: VisionService;
 
@@ -175,6 +183,7 @@ class PetSession implements PetConvai {
     this.name = name;
     this.store = ctx.store;
     this.live = ctx.live;
+    this.gate = ctx.gate;
     this.getBus = ctx.getBus;
     this.lastRec = ctx.store.state.characters[name] ?? fallbackRecord(name);
     this.voiceOn = this.lastRec.voiceEnabled;
@@ -239,6 +248,7 @@ class PetSession implements PetConvai {
   }
 
   ensureConnected(): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error('Session closed.'));
     this.touchActivity();
     const c = this.client_;
     if (c !== null && c.state.isConnected && c.isBotReady) return Promise.resolve();
@@ -254,6 +264,8 @@ class PetSession implements PetConvai {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
     }
+    // A full disconnect ends the connection epoch — re-probe video next time.
+    this.videoCapable = true;
     await this.vision.revoke();
     const c = this.client_;
     if (c !== null && (c.state.isConnected || c.state.isConnecting)) {
@@ -466,6 +478,7 @@ class PetSession implements PetConvai {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     await this.vision.dispose();
     if (this.idleTimer !== null) {
       clearTimeout(this.idleTimer);
@@ -508,6 +521,22 @@ class PetSession implements PetConvai {
   }
 
   private async doConnect(): Promise<void> {
+    // Guard against dispose()/resetClient() running while we are connecting:
+    // any teardown bumps clientEpoch, and a stale connect must not resurrect
+    // the session. obtainClient tears down the old client itself, so the
+    // epoch is re-captured after every obtainClient call.
+    let epoch = this.clientEpoch;
+    const bailIfStale = async (c: ConvaiClient): Promise<void> => {
+      if (this.clientEpoch === epoch && !this.disposed) return;
+      try {
+        await c.disconnect();
+      } catch {
+        // Already down.
+      }
+      if (this.client_ === c) await this.teardownClient();
+      this.live.delete(this);
+      throw new Error('Session closed while connecting.');
+    };
     const settings = this.store.state.settings;
     const rec = this.rec();
     if (settings.apiKey.trim().length === 0) {
@@ -520,10 +549,24 @@ class PetSession implements PetConvai {
       this.setStatus({ error: msg });
       throw new Error(msg);
     }
-    await this.evictForCapacity();
+    // Serialize evict+reserve across sessions so concurrent connects can
+    // never overshoot the cap: the live slot is claimed before the network
+    // connect begins (failure paths below release it via live.delete).
+    const prev = this.gate.p;
+    let release!: () => void;
+    this.gate.p = new Promise((r) => (release = r));
+    await prev;
+    try {
+      await this.evictForCapacity();
+      this.live.add(this);
+    } finally {
+      release();
+    }
     this.setStatus({ activity: 'connecting', error: null });
 
     let client = await this.obtainClient(settings, rec);
+    epoch = this.clientEpoch;
+    this.live.add(this); // teardown inside obtainClient clears the reservation
     try {
       await this.connectAndAwaitReady(client);
     } catch (err) {
@@ -532,6 +575,7 @@ class PetSession implements PetConvai {
       } catch {
         // Never got up.
       }
+      await bailIfStale(client);
       const msg =
         err instanceof Error ? err.message : 'Could not reach Convai — try again in a moment.';
       const authLike = /API key|character ID/i.test(msg);
@@ -541,6 +585,8 @@ class PetSession implements PetConvai {
         console.warn(`[convai:${this.name}] video connect failed — retrying audio-only`);
         this.videoCapable = false;
         client = await this.obtainClient(settings, rec);
+        epoch = this.clientEpoch;
+        this.live.add(this); // re-claim the slot after the rebuild's teardown
         try {
           await this.connectAndAwaitReady(client);
         } catch (err2) {
@@ -549,6 +595,9 @@ class PetSession implements PetConvai {
           } catch {
             // Never got up.
           }
+          // Audio-only failed too — the problem wasn't video. Don't latch the
+          // downgrade; let the next connect attempt try video again.
+          this.videoCapable = true;
           this.live.delete(this);
           const msg2 =
             err2 instanceof Error ? err2.message : 'Could not reach Convai — try again in a moment.';
@@ -561,6 +610,7 @@ class PetSession implements PetConvai {
         throw new Error(msg);
       }
     }
+    await bailIfStale(client);
     this.live.add(this);
     this.setStatus({ activity: activityFrom(client.state), error: null });
     this.applyTts();
@@ -748,6 +798,7 @@ class PetSession implements PetConvai {
   }
 
   private async teardownClient(): Promise<void> {
+    this.clientEpoch++; // any in-flight doConnect for the old client must bail
     for (const off of this.unsubs) {
       try {
         off();
@@ -780,6 +831,8 @@ class PetSession implements PetConvai {
   }
 
   private async resetClient(): Promise<void> {
+    // Identity-level reset ends the connection epoch — re-probe video next time.
+    this.videoCapable = true;
     await this.vision.revoke();
     await this.teardownClient();
     this.setStatus({ activity: 'disconnected', micOn: false });
@@ -931,7 +984,7 @@ export function createConvaiLayer(deps: AppStore | { store: AppStore }): ConvaiL
   const sessions = new Map<string, PetSession>();
   let bus!: ContextBus;
 
-  const ctx: SessionCtx = { store, live, getBus: () => bus };
+  const ctx: SessionCtx = { store, live, gate: { p: Promise.resolve() }, getBus: () => bus };
 
   function forSession(name: string): PetSession {
     let s = sessions.get(name);
@@ -942,11 +995,15 @@ export function createConvaiLayer(deps: AppStore | { store: AppStore }): ConvaiL
     return s;
   }
 
+  /** Pinned ≈ mid-crosstalk: a competing prompt's reply would be captured as the crosstalk turn. */
+  const isBusy = (name: string): boolean => sessions.get(name)?.pinned === true;
+
   bus = createContextBus({
     getSettings: () => store.state.settings,
     peers: () =>
       store.characters.filter((r) => r.spawned && !r.archived).map((r) => forSession(r.name).peer),
     liveCount: () => live.size,
+    isBusy,
   });
   bus.start();
 
@@ -963,6 +1020,7 @@ export function createConvaiLayer(deps: AppStore | { store: AppStore }): ConvaiL
     promptPet,
     hasApiKey: () => store.state.settings.apiKey.trim().length > 0,
     isSpawned,
+    isBusy,
     displayName,
   });
 

@@ -21,6 +21,8 @@ export interface RemindersDeps {
   promptPet(name: string, text: string): Promise<void>;
   hasApiKey(): boolean;
   isSpawned(name: string): boolean;
+  /** Mid-crosstalk — a spoken announcement would be captured as a crosstalk turn. */
+  isBusy(name: string): boolean;
   displayName(name: string): string;
 }
 
@@ -83,7 +85,13 @@ export function createRemindersEngine(deps: RemindersDeps): RemindersEngine & { 
     sounds.play('reminder');
     // Let the overlay UI bounce the pet / show the bubble.
     void notifyReminderDue({ ...reminder, fired: true }).catch(() => undefined);
-    if (deps.hasApiKey() && deps.isSpawned(reminder.characterName)) {
+    // Skip the spoken announcement mid-crosstalk (the notification, sound and
+    // overlay bounce above are the fallback delivery either way).
+    if (
+      deps.hasApiKey() &&
+      deps.isSpawned(reminder.characterName) &&
+      !deps.isBusy(reminder.characterName)
+    ) {
       deps
         .promptPet(
           reminder.characterName,

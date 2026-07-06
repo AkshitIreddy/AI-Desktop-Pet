@@ -56,7 +56,13 @@ export class AppStore {
   private listeners = new Set<Listener>();
   state!: PersistedState;
 
-  async load(): Promise<PersistedState> {
+  /**
+   * Load persisted state. Only the initializing window (the dashboard) passes
+   * `{ init: true }`, which generates first-run defaults (endUserId) and
+   * persists them — a single writer, so both windows can never race to mint
+   * and save two different ids on first run.
+   */
+  async load(opts?: { init?: boolean }): Promise<PersistedState> {
     const existing = await this.store.get<PersistedState>(KEY);
     if (existing && existing.schemaVersion === SCHEMA_VERSION) {
       this.state = this.mergeDefaults(existing);
@@ -70,10 +76,12 @@ export class AppStore {
       };
       await this.migrateLegacy();
     }
-    if (!this.state.settings.endUserId) {
-      this.state.settings.endUserId = crypto.randomUUID();
+    if (opts?.init) {
+      if (!this.state.settings.endUserId) {
+        this.state.settings.endUserId = crypto.randomUUID();
+      }
+      await this.persist();
     }
-    await this.persist();
     return this.state;
   }
 
@@ -139,6 +147,17 @@ export class AppStore {
     for (const cb of this.listeners) cb(this.state);
   }
 
+  /**
+   * Re-read the shared store so mutations never persist a stale snapshot.
+   * Both windows write the whole blob last-writer-wins; tauri-plugin-store
+   * shares one Rust-side store per path, so this cheap get() always returns
+   * the other window's latest committed state.
+   */
+  private async sync(): Promise<void> {
+    const loaded = await this.store.get<PersistedState>(KEY);
+    if (loaded && loaded.schemaVersion === SCHEMA_VERSION) this.state = loaded;
+  }
+
   subscribe(cb: Listener): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
@@ -147,6 +166,7 @@ export class AppStore {
   /* ------------------------------- settings ------------------------------- */
 
   async saveSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+    await this.sync();
     this.state.settings = { ...this.state.settings, ...patch };
     await this.persist();
     return this.state.settings;
@@ -171,6 +191,7 @@ export class AppStore {
     name: string,
     patch: Partial<Omit<CharacterRecord, 'name'>>,
   ): Promise<CharacterRecord | undefined> {
+    await this.sync();
     const rec = this.state.characters[name];
     if (!rec) return undefined;
     Object.assign(rec, patch);
@@ -189,6 +210,7 @@ export class AppStore {
     animation: AnimationConfig,
     spriteSource: string,
   ): Promise<CharacterRecord> {
+    await this.sync();
     let name = sanitizeName(displayName);
     if (!name) throw new Error('Name must contain letters or numbers.');
     while (this.state.characters[name]) name = `${name}-2`;
@@ -212,6 +234,7 @@ export class AppStore {
   }
 
   async deleteCharacter(name: string): Promise<void> {
+    await this.sync();
     const rec = this.state.characters[name];
     if (!rec) return;
     if (!rec.isUserAdded) throw new Error('Bundled characters can be archived, not deleted.');
@@ -222,6 +245,7 @@ export class AppStore {
   /* --------------------------- reminders & notes --------------------------- */
 
   async addReminder(r: Omit<Reminder, 'id' | 'createdAt' | 'acknowledged' | 'fired'>): Promise<Reminder> {
+    await this.sync();
     const reminder: Reminder = {
       ...r,
       id: crypto.randomUUID(),
@@ -235,6 +259,7 @@ export class AppStore {
   }
 
   async updateReminder(id: string, patch: Partial<Reminder>): Promise<void> {
+    await this.sync();
     const r = this.state.reminders.find((x) => x.id === id);
     if (!r) return;
     Object.assign(r, patch);
@@ -242,11 +267,13 @@ export class AppStore {
   }
 
   async deleteReminder(id: string): Promise<void> {
+    await this.sync();
     this.state.reminders = this.state.reminders.filter((x) => x.id !== id);
     await this.persist();
   }
 
   async addNote(text: string, color: string): Promise<Note> {
+    await this.sync();
     const note: Note = { id: crypto.randomUUID(), text, color, createdAt: Date.now() };
     this.state.notes.push(note);
     await this.persist();
@@ -254,6 +281,7 @@ export class AppStore {
   }
 
   async updateNote(id: string, patch: Partial<Note>): Promise<void> {
+    await this.sync();
     const n = this.state.notes.find((x) => x.id === id);
     if (!n) return;
     Object.assign(n, patch);
@@ -261,6 +289,7 @@ export class AppStore {
   }
 
   async deleteNote(id: string): Promise<void> {
+    await this.sync();
     this.state.notes = this.state.notes.filter((x) => x.id !== id);
     await this.persist();
   }

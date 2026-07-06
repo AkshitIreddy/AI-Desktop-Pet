@@ -99,11 +99,12 @@ export function ChatPanel({ petName }: { petName: string }) {
     };
   }, [pc]);
 
-  // Hit region follows the panel.
+  // Hit region follows the panel. Namespaced per pet so an exiting panel
+  // (AnimatePresence pet switch) only deletes its own region, never the new one's.
   useEffect(() => {
-    hitRegionRegistry.set('chat', { x: pos.x, y: pos.y, w: W, h: H });
-  }, [pos]);
-  useEffect(() => () => hitRegionRegistry.set('chat', null), []);
+    hitRegionRegistry.set(`chat:${petName}`, { x: pos.x, y: pos.y, w: W, h: H });
+  }, [pos, petName]);
+  useEffect(() => () => hitRegionRegistry.set(`chat:${petName}`, null), [petName]);
 
   // Auto-scroll while the user hasn't scrolled up; receive chime on turn end.
   useEffect(() => {

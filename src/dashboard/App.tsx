@@ -47,6 +47,9 @@ export function App() {
   const ready = useDashboard((s) => s.ready);
   const reduceMotion = useDashboard((s) => s.settings.reduceMotion);
   const showOnboarding = useDashboard((s) => s.settings.showOnboarding);
+  // Esc/backdrop hides the tour for this session only; Finish persists it off.
+  const tourHidden = useDashboard((s) => s.tourHidden);
+  const setTourHidden = useDashboard((s) => s.setTourHidden);
   const [page, setPage] = useState<PageId>('characters');
 
   if (!ready) {
@@ -96,8 +99,11 @@ export function App() {
       </div>
 
       <AnimatePresence>
-        {showOnboarding && (
-          <OnboardingModal onOpenDocs={() => setPage('docs')} />
+        {showOnboarding && !tourHidden && (
+          <OnboardingModal
+            onOpenDocs={() => setPage('docs')}
+            onDismiss={() => setTourHidden(true)}
+          />
         )}
       </AnimatePresence>
 

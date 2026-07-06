@@ -170,6 +170,7 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
         if (staying.delete(name)) {
           director.stopSkill(name, 'stay');
         } else {
+          following.delete(name); // director.runSkill('stay') kills the follow-cursor loop
           staying.add(name);
           director.runSkill(name, 'stay');
         }
@@ -200,7 +201,7 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
       case 'wander':
         if (staying.delete(name)) director.stopSkill(name, 'stay');
         if (following.delete(name)) director.stopSkill(name, 'follow-cursor');
-        cancelPomodoro(ctx, true);
+        cancelPomodoro(ctx);
         if (pet.state === 'sleeping') pet.wake();
         director.runSkill(name, 'wander');
         break;
@@ -255,8 +256,8 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
           ui.toast('Focus session cancelled', 'info');
           break;
         }
-        pet.pin('pomodoro');
-        void pet.playIdle().catch(() => {});
+        following.delete(name); // director.runSkill('pomodoro') kills the follow-cursor loop
+        director.runSkill(name, 'pomodoro'); // abort running behavior + pin + sit
         const timer = window.setTimeout(() => finishPomodoro(ctx), POMODORO_MS);
         pomodoros.set(name, { endsAt: Date.now() + POMODORO_MS, timer });
         ui.toast(`Focus time — ${rec.displayName} will sit with you for 25 minutes`, 'success');
@@ -324,6 +325,7 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
         break;
 
       case 'hide':
+        following.delete(name); // followLoop self-exits when the pet hides
         director.runSkill(name, 'hide');
         ui.toast(`${rec.displayName} will be back in 15 minutes`, 'info');
         break;
@@ -342,24 +344,23 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
   }
 }
 
-function cancelPomodoro(ctx: SkillContext, silent = false): boolean {
+function cancelPomodoro(ctx: SkillContext): boolean {
   const name = ctx.pet.rec.name;
   const p = pomodoros.get(name);
   if (!p) return false;
   window.clearTimeout(p.timer);
   pomodoros.delete(name);
   ctx.pet.unpin('pomodoro');
-  if (!silent) void ctx.pet.playIdle().catch(() => {});
+  ctx.pet.wake(); // cancelled — stand back up, no celebration
   return true;
 }
 
 function finishPomodoro(ctx: SkillContext): void {
-  const { pet, layer, store } = ctx;
+  const { pet, director, layer, store } = ctx;
   const name = pet.rec.name;
   if (!pomodoros.delete(name)) return;
-  pet.unpin('pomodoro');
+  director.stopSkill(name, 'pomodoro'); // unpin + wake + celebrate one-shot
   sounds.play('complete');
-  void pet.playSpecial().catch(() => {});
   const displayName = store.state.characters[name]?.displayName ?? name;
   void notifyNative(
     'Focus session complete',

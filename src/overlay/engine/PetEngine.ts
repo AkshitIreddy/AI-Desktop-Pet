@@ -294,6 +294,15 @@ export class Pet implements PetHandle {
         this.pos.x = side === 'left' ? 0 : this.env.width - this.size;
         this.climbTarget = clamp(toY, 0, this.floorY());
         this.climbDirSign = this.climbTarget < this.pos.y ? -1 : 1;
+        const mid = this.env.height / 2;
+        if (
+          (this.climbDirSign > 0 && this.pos.y >= mid) ||
+          (this.climbDirSign < 0 && this.pos.y <= mid)
+        ) {
+          // Starting at/past the midpoint (e.g. patrol descent) — the v1
+          // coin flip only arms for climbs that actually cross mid.
+          this.climbMidChecked = true;
+        }
         this.setState(side === 'left' ? 'climbing-left' : 'climbing-right');
       }
     });
@@ -640,7 +649,16 @@ export class Pet implements PetHandle {
     const standX = t.side === 'left' ? live.left - this.size : live.right;
     if (Math.abs(standX - this.pos.x) > 3) {
       // The window moved while we were walking — keep following its side.
-      this.walkTarget = clamp(standX, 0, Math.max(0, this.env.width - this.size));
+      const target = clamp(standX, 0, Math.max(0, this.env.width - this.size));
+      if (this.clampWalkX(target) === this.pos.x) {
+        // Stand position is unreachable from the current surface — give up
+        // rather than re-issuing the same walk forever.
+        this.task = null;
+        this.stand();
+        t.resolve(false);
+        return;
+      }
+      this.walkTarget = target;
       this.faceToward(this.walkTarget);
       return;
     }
