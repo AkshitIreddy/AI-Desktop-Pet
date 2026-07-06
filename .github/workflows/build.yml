@@ -52,6 +52,8 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
+        # Beyond the standard Tauri set: xcap (native screen capture for the
+        # vision feature) builds against PipeWire/Wayland/EGL/DBus dev libs.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -59,7 +61,14 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libasound2-dev
+            libasound2-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            libwayland-dev \
+            libegl1-mesa-dev \
+            libdbus-1-dev \
+            libxcb1-dev \
+            libxrandr-dev
 
       - name: Install frontend dependencies
         run: npm ci
@@ -69,7 +78,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           # __VERSION__ is replaced by tauri-action with the app version from
-          # tauri.conf.json — all four matrix jobs upload into this one release.
+          # tauri.conf.json — all four matrix jobs upload into this ONE release.
+          # The release is created as a DRAFT so it stays invisible while the
+          # platform installers stream in; when every job is green, open
+          # Releases → the vX.Y.Z draft → Publish. Watchers then get a single
+          # complete announcement with all platforms attached.
           tagName: v__VERSION__
           releaseName: 'Convai Desktop Pets v__VERSION__'
           releaseBody: >
@@ -77,6 +90,6 @@ jobs:
             See the [README](https://github.com/AkshitIreddy/convai-desktop-pet#readme)
             for what's inside, then download the installer for your OS below
             (Windows: .exe · macOS: .dmg · Linux: .deb / .AppImage).
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
