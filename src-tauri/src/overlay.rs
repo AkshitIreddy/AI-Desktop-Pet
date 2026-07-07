@@ -183,7 +183,11 @@ fn is_interactive(hwnd: isize) -> bool {
 fn cursor_poll_loop(app: AppHandle) {
     let mut tick: u64 = 0;
     let mut last_emitted = (f64::MIN, f64::MIN);
-    let mut last_area = crate::primary_work_area(&app).ok();
+    // Serialized VirtualScreen: cheap structural comparison that catches
+    // monitor plug/unplug, resolution, DPI and work-area (taskbar) changes.
+    let mut last_layout: Option<String> = crate::compute_virtual_screen(&app)
+        .ok()
+        .and_then(|vs| serde_json::to_string(&vs).ok());
 
     #[cfg(windows)]
     let overlay_hwnd: Option<isize> = app
@@ -195,16 +199,19 @@ fn cursor_poll_loop(app: AppHandle) {
         std::thread::sleep(std::time::Duration::from_millis(16));
         tick = tick.wrapping_add(1);
 
-        // ~2 s: detect work-area changes (resolution, DPI, taskbar move) and
-        // resync overlay geometry + notify the webview.
+        // ~2 s: detect monitor-layout changes (plug/unplug, resolution, DPI,
+        // taskbar move) and resync overlay geometry + notify the webview with
+        // both "work-area-changed" and "monitors-changed".
         if tick % 128 == 0 {
-            if let Ok(area) = crate::primary_work_area(&app) {
-                if last_area != Some(area) {
-                    last_area = Some(area);
-                    let handle = app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        crate::resync_overlay(&handle, area);
-                    });
+            if let Ok(vs) = crate::compute_virtual_screen(&app) {
+                if let Ok(serialized) = serde_json::to_string(&vs) {
+                    if last_layout.as_deref() != Some(serialized.as_str()) {
+                        last_layout = Some(serialized);
+                        let handle = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            crate::resync_overlay(&handle, vs);
+                        });
+                    }
                 }
             }
         }

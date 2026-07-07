@@ -1,6 +1,6 @@
 [package]
 name = "convai-desktop-pet"
-version = "2.0.0"
+version = "2.1.0"
 description = "AI-powered desktop companions built with Tauri and Convai"
 authors = ["Akshit Ireddy"]
 edition = "2021"
@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"] }
 tauri-plugin-store = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
@@ -26,6 +26,7 @@ base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 xcap = "0.9"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+tauri-plugin-global-shortcut = "2.3.2"
 
 [target.'cfg(windows)'.dependencies]
 # Must track the exact webview2-com line used by tauri/wry (2.11 -> 0.38).

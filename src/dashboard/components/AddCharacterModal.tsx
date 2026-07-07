@@ -1,14 +1,19 @@
 /**
- * AddCharacterModal — 3-step wizard: pick a bundled sprite set → name it and
- * link a Convai id → confirm. User-added characters reuse a bundled sprite
- * set (spriteSource) while keeping their own Convai identity.
+ * AddCharacterModal — 3-step wizard: pick a look (bundled sprite set OR a
+ * folder of your own shimeji frames) → name it and link a Convai id →
+ * confirm. Custom folders are copied into app data by the Rust
+ * `import_sprite_set` command, which also derives the AnimationConfig from
+ * the file naming.
  */
 import { AnimatePresence, motion } from 'framer-motion';
 import { useId, useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import defaultCharacters from '../../shared/characters.default.json';
+import { ipc } from '../../shared/ipc';
 import { sounds } from '../../shared/sounds';
-import type { AnimationConfig } from '../../shared/types';
+import { spriteUrl } from '../../shared/store';
+import type { AnimationConfig, CharacterRecord } from '../../shared/types';
 import { CONVAI_ID_RE, useDashboard } from '../state';
 import { ModalShell } from './controls';
 
@@ -16,6 +21,14 @@ interface SpriteSet {
   name: string;
   displayName: string;
   animation: AnimationConfig;
+}
+
+interface CustomSet {
+  /** Stored directory (inside app data) returned by import_sprite_set. */
+  dir: string;
+  animation: AnimationConfig;
+  /** Folder basename, for display. */
+  label: string;
 }
 
 const SPRITE_SETS: SpriteSet[] = Object.entries(
@@ -31,14 +44,27 @@ const SPRITE_SETS: SpriteSet[] = Object.entries(
 
 const STEPS = ['Sprite', 'Identity', 'Confirm'] as const;
 
+/** Preview URL for a walk1 frame of either source. */
+function previewSrc(sprite: SpriteSet | null, custom: CustomSet | null): string {
+  if (custom) {
+    return spriteUrl({ spriteDir: custom.dir } as CharacterRecord, 'walk1.png');
+  }
+  if (sprite) {
+    return spriteUrl({ name: sprite.name } as CharacterRecord, 'walk1.png');
+  }
+  return '';
+}
+
 export function AddCharacterModal(props: { open: boolean; onClose: () => void }) {
-  const { open, onClose } = props;
+  const { open: isOpen, onClose } = props;
   const addCharacter = useDashboard((s) => s.addCharacter);
   const toast = useDashboard((s) => s.toast);
   const titleId = useId();
 
   const [step, setStep] = useState(0);
   const [sprite, setSprite] = useState<SpriteSet | null>(null);
+  const [custom, setCustom] = useState<CustomSet | null>(null);
+  const [importing, setImporting] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [convaiId, setConvaiId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -46,6 +72,8 @@ export function AddCharacterModal(props: { open: boolean; onClose: () => void })
   const reset = () => {
     setStep(0);
     setSprite(null);
+    setCustom(null);
+    setImporting(false);
     setDisplayName('');
     setConvaiId('');
     setBusy(false);
@@ -58,18 +86,47 @@ export function AddCharacterModal(props: { open: boolean; onClose: () => void })
   };
 
   const idInvalid = !!convaiId.trim() && !CONVAI_ID_RE.test(convaiId.trim());
+  const hasLook = sprite !== null || custom !== null;
   const canNext =
-    step === 0 ? sprite !== null : step === 1 ? !!displayName.trim() && !idInvalid : true;
+    step === 0 ? hasLook : step === 1 ? !!displayName.trim() && !idInvalid : true;
+
+  const importOwn = async () => {
+    if (importing) return;
+    try {
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        title: 'Pick the folder with your sprite frames',
+      });
+      if (!picked || Array.isArray(picked)) return;
+      setImporting(true);
+      const base = picked.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'custom';
+      const name = base.toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'custom';
+      const res = await ipc.importSpriteSet(picked, name);
+      setCustom({ dir: res.dir, animation: res.animation, label: base });
+      setSprite(null);
+      if (!displayName.trim()) setDisplayName(base);
+      sounds.play('select');
+    } catch (err) {
+      sounds.play('error');
+      toast(
+        err instanceof Error ? err.message : String(err ?? 'Could not import sprites.'),
+        'error',
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const finish = async () => {
-    if (!sprite || busy || idInvalid) return;
+    if (!hasLook || busy || idInvalid) return;
     setBusy(true);
     try {
       await addCharacter(
         displayName.trim(),
         convaiId.trim(),
-        sprite.animation,
-        sprite.name,
+        custom ? custom.animation : sprite!.animation,
+        custom ? { spriteDir: custom.dir } : { spriteSource: sprite!.name },
       );
       sounds.play('spawn');
       toast(`${displayName.trim()} joined the roster!`, 'success');
@@ -82,7 +139,7 @@ export function AddCharacterModal(props: { open: boolean; onClose: () => void })
 
   return (
     <AnimatePresence>
-      {open && (
+      {isOpen && (
         <ModalShell onClose={close} width={560} labelledBy={titleId}>
           <h3 id={titleId} className="cdp-modal-title">
             Add a character
@@ -115,9 +172,50 @@ export function AddCharacterModal(props: { open: boolean; onClose: () => void })
               {step === 0 && (
                 <>
                   <p className="cdp-modal-body" style={{ marginBottom: 12 }}>
-                    Pick a look. Your new character borrows one of the bundled sprite
-                    sets — custom sprite import is coming soon.
+                    Pick a look — borrow a bundled sprite set, or import a folder of
+                    your own shimeji frames.
                   </p>
+
+                  <button
+                    type="button"
+                    className="cdp-import-card"
+                    data-on={custom !== null || undefined}
+                    aria-pressed={custom !== null}
+                    disabled={importing}
+                    onClick={() => void importOwn()}
+                  >
+                    {custom ? (
+                      <img
+                        src={previewSrc(null, custom)}
+                        alt=""
+                        draggable={false}
+                        className="cdp-import-preview"
+                      />
+                    ) : (
+                      <span className="cdp-import-icon" aria-hidden>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+                          <path d="M12 10v6" />
+                          <path d="M9 13l3-3 3 3" />
+                        </svg>
+                      </span>
+                    )}
+                    <span className="cdp-import-meta">
+                      <strong>
+                        {importing
+                          ? 'Importing…'
+                          : custom
+                            ? `Your sprites: ${custom.label}`
+                            : 'Import your own'}
+                      </strong>
+                      <span>
+                        {custom
+                          ? 'Looks good! Click to pick a different folder.'
+                          : 'Pick a folder of PNG frames. walk1…N.png is required; climb, fall, drag, id1_1…, sp1_1… are optional.'}
+                      </span>
+                    </span>
+                  </button>
+
                   <div className="cdp-sprite-grid" role="radiogroup" aria-label="Sprite set">
                     {SPRITE_SETS.map((set) => (
                       <button
@@ -130,10 +228,11 @@ export function AddCharacterModal(props: { open: boolean; onClose: () => void })
                         onClick={() => {
                           sounds.play('select');
                           setSprite(set);
+                          setCustom(null);
                         }}
                       >
                         <img
-                          src={`/assets/${set.name}/walk1.png`}
+                          src={spriteUrl({ name: set.name } as CharacterRecord, 'walk1.png')}
                           alt=""
                           draggable={false}
                           loading="lazy"
@@ -196,21 +295,17 @@ export function AddCharacterModal(props: { open: boolean; onClose: () => void })
                 </>
               )}
 
-              {step === 2 && sprite && (
+              {step === 2 && hasLook && (
                 <div style={{ textAlign: 'center', padding: '8px 0' }}>
                   <div
                     className="cdp-char-preview"
                     style={{ width: 150, margin: '0 auto 14px' }}
                   >
-                    <img
-                      src={`/assets/${sprite.name}/walk1.png`}
-                      alt=""
-                      draggable={false}
-                    />
+                    <img src={previewSrc(sprite, custom)} alt="" draggable={false} />
                   </div>
                   <p style={{ fontSize: 16, fontWeight: 640 }}>{displayName.trim()}</p>
                   <p className="cdp-modal-body" style={{ marginTop: 6 }}>
-                    {sprite.displayName} sprite set
+                    {custom ? `Your “${custom.label}” sprites` : `${sprite!.displayName} sprite set`}
                     {convaiId.trim()
                       ? ` · linked to ${convaiId.trim().slice(0, 8)}…`
                       : ' · no Convai id yet (chat disabled until you add one)'}

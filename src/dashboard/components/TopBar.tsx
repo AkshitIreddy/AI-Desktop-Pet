@@ -1,3 +1,4 @@
+import { sounds } from '../../shared/sounds';
 import { APP_VERSION, useDashboard, type PageId } from '../state';
 
 const TITLES: Record<PageId, string> = {
@@ -24,7 +25,10 @@ export function TopBar(props: { page: PageId; onNavigate: (p: PageId) => void })
             ? 'Convai API key is set — open Settings to change it'
             : 'No Convai API key yet — click to add one'
         }
-        onClick={() => onNavigate('settings')}
+        onClick={() => {
+          sounds.play('select');
+          onNavigate('settings');
+        }}
       >
         <span className="dot" aria-hidden />
         {hasKey ? 'API key set' : 'No API key'}

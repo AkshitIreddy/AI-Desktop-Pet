@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useMemo, useState } from 'react';
 import { sounds } from '../../shared/sounds';
-import { spriteFolder } from '../../shared/store';
+import { spriteUrl } from '../../shared/store';
 import { characterList, useDashboard } from '../state';
 import { AddCharacterModal } from '../components/AddCharacterModal';
 import { CharacterCard } from '../components/CharacterCard';
@@ -127,7 +127,7 @@ export function CharactersPage() {
                 {archived.map((rec) => (
                   <div key={rec.name} className="cdp-archived-row">
                     <img
-                      src={`/assets/${spriteFolder(rec)}/walk1.png`}
+                      src={spriteUrl(rec, 'walk1.png')}
                       alt=""
                       draggable={false}
                       loading="lazy"

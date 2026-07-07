@@ -38,7 +38,16 @@ export interface PetConvai {
   interrupt(): void;
   setMic(on: boolean): Promise<void>;
 
-  /** Timed screen-vision grant; auto-revokes. Extends the timer if active. */
+  /**
+   * Timed screen-vision grant; auto-revokes. Extends the timer if active.
+   * The duration ALWAYS comes from the caller — the UI resolves the
+   * show-screen "minutes" skill param (falling back to
+   * settings.visionSessionMinutes when the character has no override); the
+   * layer never reads that setting itself. While active, a watch-party
+   * commentary loop runs at a cadence from the "chattiness" skill param
+   * (100→~45 s, 50→~2 min, 0→never); plain free-will nudges are suspended
+   * and the pet is excluded from crosstalk pairing (reminders still fire).
+   */
   grantVision(minutes: number): Promise<void>;
   revokeVision(): Promise<void>;
   /** One capture + forced comment on what's visible; no ongoing access. */
@@ -50,6 +59,8 @@ export interface PetConvai {
   nudge(text: string): void;
   /** Context the character MUST respond to (run_llm "true"). */
   prompt(text: string): void;
+  /** One short in-character reaction to a sticky note the user just pinned. */
+  reactToNote(noteText: string): void;
 
   setVoiceEnabled(on: boolean): void;
   /** Whisper mode: force text-only replies regardless of voiceEnabled. */
@@ -87,6 +98,20 @@ export interface ConvaiLayer {
   dropPet(name: string): Promise<void>;
   /** Re-read settings/characters (api key, LTM toggles, voice…). */
   refresh(): void;
+  /**
+   * AUTO-CONNECT (settings.autoConnect): connect the given spawned pets now
+   * instead of lazily. Respects the live-connection cap — freeWill pets win
+   * slots first, then the most recently active; the rest stay lazy. Every
+   * failure is silent apart from that pet's status error. No-op when
+   * autoConnect is off or no API key is set. The runtime calls this on boot
+   * and on spawn changes; the layer also self-triggers it from refresh().
+   */
+  ensureSpawnedConnected(names: string[]): Promise<void>;
+  /**
+   * Spawned, non-archived character names, most recently interacted-with
+   * first — the UI's pick list for "the active pet" (hotkeys, note reactions).
+   */
+  activeCandidates(): string[];
   /** Disconnect everything (app teardown). */
   disposeAll(): Promise<void>;
   readonly crosstalk: CrosstalkApi;

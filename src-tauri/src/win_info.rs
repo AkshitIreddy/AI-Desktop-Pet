@@ -1,5 +1,6 @@
-//! Enumerates visible top-level windows of other applications so pets can
-//! walk on them. Windows-only; other platforms return an empty list.
+//! Enumerates visible top-level windows so pets can walk on them — including
+//! our own dashboard window, but never the pets overlay itself.
+//! Windows-only; other platforms return an empty list.
 
 use serde::Serialize;
 
@@ -57,7 +58,6 @@ fn collect_windows() -> Vec<NativeWindow> {
         let _ = EnumWindows(Some(enum_cb), LPARAM(&mut handles as *mut _ as isize));
     }
 
-    let own_pid = std::process::id();
     let mut out = Vec::new();
 
     for hwnd in handles {
@@ -91,6 +91,14 @@ fn collect_windows() -> Vec<NativeWindow> {
             }
             let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
 
+            // Belt and braces: the pets overlay is normally excluded by the
+            // WS_EX_NOACTIVATE filter above, but focusability toggling
+            // (set_overlay_focusable) rewrites GWL_EXSTYLE and could clear
+            // that bit — never let pets walk on their own overlay.
+            if title == "Pets Overlay" {
+                continue;
+            }
+
             let mut class_buf = [0u16; 128];
             let class_len = GetClassNameW(hwnd, &mut class_buf);
             let class = String::from_utf16_lossy(&class_buf[..class_len.max(0) as usize]);
@@ -102,11 +110,10 @@ fn collect_windows() -> Vec<NativeWindow> {
                 continue;
             }
 
+            // NOTE: own-process windows are intentionally NOT skipped — the
+            // dashboard ("Convai Desktop Pets") is a valid walking platform.
             let mut pid: u32 = 0;
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
-            if pid == own_pid {
-                continue;
-            }
 
             let minimized = IsIconic(hwnd).as_bool();
             if minimized {

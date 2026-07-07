@@ -26,6 +26,10 @@
     "autostart:allow-is-enabled",
     "opener:default",
     "opener:allow-open-url",
-    "dialog:default"
+    "dialog:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
+    "global-shortcut:allow-is-registered"
   ]
 }

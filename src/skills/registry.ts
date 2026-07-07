@@ -33,6 +33,10 @@ const defs: SkillDef[] = [
     description: 'Let this character see your screen for a limited time. A countdown badge shows while active.',
     kind: 'toggle',
     needsConvai: true,
+    params: [
+      { key: 'minutes', label: 'Session length', min: 1, max: 60, step: 1, default: 10, unit: 'min' },
+      { key: 'chattiness', label: 'Comment cadence', min: 0, max: 100, step: 5, default: 70, unit: '%' },
+    ],
   },
   {
     id: 'free-will',
@@ -129,9 +133,12 @@ const defs: SkillDef[] = [
     id: 'pomodoro',
     label: 'Focus timer',
     icon: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/>',
-    description: 'A 25-minute focus session. The character sits quietly, then celebrates when you finish.',
+    description: 'A focus session. The character sits quietly, then celebrates when you finish.',
     kind: 'toggle',
     needsConvai: false,
+    params: [
+      { key: 'minutes', label: 'Session length', min: 5, max: 90, step: 5, default: 25, unit: 'min' },
+    ],
   },
   {
     id: 'daily-briefing',
@@ -169,9 +176,12 @@ const defs: SkillDef[] = [
     id: 'hide',
     label: 'Hide awhile',
     icon: '<path d="M4 21v-9a8 8 0 0 1 16 0v9l-3-2-2.5 2-2.5-2-2.5 2L7 19Z"/><circle cx="9.5" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="11" r="1" fill="currentColor" stroke="none"/>',
-    description: 'The character slips away for 15 minutes, then pops back in.',
+    description: 'The character slips away for a while, then pops back in.',
     kind: 'action',
     needsConvai: false,
+    params: [
+      { key: 'minutes', label: 'Hide for', min: 1, max: 120, step: 1, default: 15, unit: 'min' },
+    ],
   },
   {
     id: 'do-a-trick',

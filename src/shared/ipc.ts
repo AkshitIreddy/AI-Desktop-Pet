@@ -5,12 +5,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
+  AnimationConfig,
   AppSettings,
   CaptureResult,
   CursorPos,
   NativeWindow,
   Rect,
   Reminder,
+  VirtualScreen,
   WorkArea,
 } from './types';
 import {
@@ -32,6 +34,18 @@ export const ipc = {
   captureScreen: (maxDim = 1280, quality = 70) =>
     invoke<CaptureResult>('capture_screen', { maxDim, quality }),
   getWorkArea: () => invoke<WorkArea>('get_work_area'),
+  /** All monitors + the virtual-screen union the overlay covers. */
+  getMonitors: () => invoke<VirtualScreen>('get_monitors'),
+  /**
+   * Copy a user-picked sprite folder into $APPDATA/sprites/<name> and derive
+   * its AnimationConfig from the shimeji file naming (walkN/climbN/fallN/
+   * dragN/idK_N/spK_N .png). Returns the stored dir + config.
+   */
+  importSpriteSet: (sourceDir: string, name: string) =>
+    invoke<{ dir: string; animation: AnimationConfig }>('import_sprite_set', {
+      sourceDir,
+      name,
+    }),
   /** Gate the ~30 Hz cursor-pos emit; off while no pets are spawned. */
   setCursorStream: (enabled: boolean) =>
     invoke<void>('set_cursor_stream', { enabled }),
@@ -50,6 +64,11 @@ export const onCursorPos = (cb: (pos: CursorPos) => void): Promise<UnlistenFn> =
 export const onWorkAreaChanged = (
   cb: (area: WorkArea) => void,
 ): Promise<UnlistenFn> => listen<WorkArea>('work-area-changed', (e) => cb(e.payload));
+
+/** Rust re-emits the full monitor layout on display changes. */
+export const onMonitorsChanged = (
+  cb: (vs: VirtualScreen) => void,
+): Promise<UnlistenFn> => listen<VirtualScreen>('monitors-changed', (e) => cb(e.payload));
 
 export const notifySettingsChanged = (settings: AppSettings) =>
   emitTo('overlay', EVT_SETTINGS_CHANGED, settings);

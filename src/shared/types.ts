@@ -29,6 +29,35 @@ export interface WorkArea {
   scale: number;
 }
 
+/** One physical monitor (all physical px, virtual-screen coordinates). */
+export interface MonitorInfo {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Work area (excludes taskbar/dock). */
+  workX: number;
+  workY: number;
+  workW: number;
+  workH: number;
+  scale: number;
+  primary: boolean;
+}
+
+/**
+ * The union of all monitors. The overlay window covers this whole rect so
+ * pets can live on any screen; each monitor keeps its own floor (work-area
+ * bottom). `scale` is the overlay window's effective DPI scale.
+ */
+export interface VirtualScreen {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  scale: number;
+  monitors: MonitorInfo[];
+}
+
 /** A visible top-level window of another application. */
 export interface NativeWindow {
   id: number;
@@ -90,6 +119,12 @@ export interface CharacterRecord {
   animation: AnimationConfig;
   /** Teleport-home anchor as a fraction of work-area width (0..1). */
   homeX?: number;
+  /** Bundled sprite-set folder this character reuses (defaults to `name`). */
+  spriteSource?: string;
+  /** Absolute directory of a user-imported custom sprite set (wins over spriteSource). */
+  spriteDir?: string;
+  /** Per-skill parameter overrides, keyed by SkillId then param key. */
+  skillSettings?: Partial<Record<SkillId, Record<string, number>>>;
 }
 
 /* ---------------------------------- settings ---------------------------------- */
@@ -138,7 +173,32 @@ export interface AppSettings {
   autostart: boolean;
   reduceMotion: boolean;
   showOnboarding: boolean;
+  /** Connect spawned characters to Convai immediately (enables free will & fast replies). */
+  autoConnect: boolean;
+  /** Close the chat panel right after sending a message with Enter. */
+  autoCloseChatOnSend: boolean;
+  /** Close the skill wheel right after picking any skill. */
+  autoCloseWheelOnSelect: boolean;
+  /**
+   * Global hotkeys: action id → accelerator (e.g. "CommandOrControl+Alt+C").
+   * Actions target the most recently interacted-with (else first) spawned pet.
+   * Empty string / missing = unbound.
+   */
+  hotkeys: Record<string, string>;
 }
+
+/** Actions that can be bound to global hotkeys. */
+export const HOTKEY_ACTIONS = [
+  'open-chat',
+  'toggle-voice',
+  'toggle-vision',
+  'look-once',
+  'open-notes',
+  'new-reminder',
+  'dance-party',
+  'toggle-wheel',
+] as const;
+export type HotkeyAction = (typeof HOTKEY_ACTIONS)[number];
 
 /* ----------------------------------- skills ----------------------------------- */
 
@@ -166,6 +226,16 @@ export type SkillId =
   | 'do-a-trick'
   | 'walk-my-window';
 
+export interface SkillParamDef {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  unit: string;
+}
+
 export interface SkillDef {
   id: SkillId;
   label: string;
@@ -178,6 +248,20 @@ export interface SkillDef {
   needsConvai: boolean;
   /** Hidden from the wheel when the matching setting is disabled. */
   gatedBy?: 'windowWalking' | 'cursorInteractions' | 'characterInteractions';
+  /** Tunable parameters (per character via CharacterRecord.skillSettings). */
+  params?: SkillParamDef[];
+}
+
+/** Resolve a skill parameter: character override → skill default. */
+export function skillParam(
+  rec: CharacterRecord,
+  skill: SkillId,
+  def: SkillDef,
+  key: string,
+): number {
+  const override = rec.skillSettings?.[skill]?.[key];
+  if (typeof override === 'number' && Number.isFinite(override)) return override;
+  return def.params?.find((p) => p.key === key)?.default ?? 0;
 }
 
 /* ------------------------------ reminders & notes ------------------------------ */

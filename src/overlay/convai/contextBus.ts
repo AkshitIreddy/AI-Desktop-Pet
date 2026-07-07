@@ -31,6 +31,10 @@ export interface ContextBusDeps {
   liveCount(): number;
   /** Mid-crosstalk — an ambient nudge's reply would be captured as a crosstalk turn. */
   isBusy(name: string): boolean;
+  /** Vision grant active — the watch-party commentary loop replaces free-will nudges. */
+  visionActive(name: string): boolean;
+  /** Ambient color for free-will prompts: pending reminders + sticky notes. */
+  stats(): { upcomingReminders: number; notes: number };
 }
 
 export interface ContextBus {
@@ -44,9 +48,12 @@ export interface ContextBus {
 
 const FLUSH_INTERVAL_MS = 10_000;
 const MAX_QUEUED = 6;
-const SCHEDULER_TICK_MS = 30_000;
-/** Never evict another pet's connection just for an ambient comment. */
-const MAX_LIVE_FOR_FREE_WILL_CONNECT = 2;
+/** 15 s tick keeps the ~45 s cadence at freeWillFrequency 100 honest. */
+const SCHEDULER_TICK_MS = 15_000;
+/** Never evict another pet's connection just for an ambient comment (= MAX_LIVE_CONNECTIONS). */
+const MAX_LIVE_FOR_FREE_WILL_CONNECT = 3;
+/** Every Nth free-will nudge is run_llm "true" so the pet reliably says something. */
+const FORCED_NUDGE_EVERY = 4;
 
 /** 'HH:MM' → minutes since midnight, or null when unset/invalid. */
 function parseHHMM(v: string): number | null {
@@ -67,11 +74,16 @@ export function inQuietHours(settings: AppSettings, now: Date = new Date()): boo
   return start < end ? cur >= start && cur < end : cur >= start || cur < end;
 }
 
-/** freeWillFrequency 0–100 → minutes between nudges (100→3 min, 0→never). */
+/**
+ * freeWillFrequency 0–100 → minutes between nudges (0→never). Piecewise
+ * linear so the default (55) lands at ~3 min (2–4 min with jitter) and the
+ * max (100) at ~45 s: 100→0.75 min, 55→3 min, 1→~24.6 min.
+ */
 export function freeWillIntervalMinutes(frequency: number): number | null {
   if (frequency <= 0) return null;
   const f = Math.min(100, Math.max(1, frequency));
-  return 3 + (100 - f) * 0.27; // linear-ish: f=1 → ~29.7 min, f=100 → 3 min
+  if (f >= 55) return 3 - (f - 55) * 0.05; // 55→3 min … 100→0.75 min (45 s)
+  return 3 + (55 - f) * 0.4; // 54→3.4 min … 1→24.6 min
 }
 
 function timeOfDay(d: Date): string {
@@ -94,6 +106,8 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
   /** Last narrated activity per pet, reused as free-will ambience. */
   const doingNotes = new Map<string, string>();
   const nextNudgeAt = new Map<string, number>();
+  /** Lifetime nudge count per pet — every FORCED_NUDGE_EVERY-th is forced. */
+  const nudgeCounts = new Map<string, number>();
   let scheduler: ReturnType<typeof setInterval> | null = null;
 
   function queueOf(name: string): PeerQueue {
@@ -142,8 +156,21 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
     peer.pushContext(text, 'true');
   }
 
+  /** Gentle closers for run_llm "auto" nudges — varied so prompts don't go stale. */
+  const SOFT_CLOSERS = [
+    'If you feel like it, say one short, friendly line to the user in character. Staying quiet is fine too.',
+    'Feel free to make one brief, in-character remark about any of this — or stay quiet.',
+    'If anything here inspires you, share one short line in character. Silence is fine too.',
+  ];
+  const FORCED_CLOSER =
+    'Say one short, friendly line to the user in character about any of this.';
+
   /** Wholesome ambience only: time of day, pet activity, window TITLE (never content). */
-  async function ambientText(peer: ContextPeer, settings: AppSettings): Promise<string> {
+  async function ambientText(
+    peer: ContextPeer,
+    settings: AppSettings,
+    forced: boolean,
+  ): Promise<string> {
     const now = new Date();
     const clock = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const parts = [`Ambient moment — it is ${timeOfDay(now)}, ${clock}.`];
@@ -158,8 +185,17 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
         // Window info is decorative; skip on failure.
       }
     }
+    const { upcomingReminders, notes } = deps.stats();
+    if (upcomingReminders > 0) {
+      parts.push(
+        `The user has ${upcomingReminders} pending reminder${upcomingReminders === 1 ? '' : 's'} with you all.`,
+      );
+    }
+    if (notes > 0) {
+      parts.push(`There ${notes === 1 ? 'is 1 sticky note' : `are ${notes} sticky notes`} pinned on the notes board.`);
+    }
     parts.push(
-      'If you feel like it, say one short, friendly line to the user in character. Staying quiet is fine too.',
+      forced ? FORCED_CLOSER : SOFT_CLOSERS[Math.floor(Math.random() * SOFT_CLOSERS.length)],
     );
     return parts.join(' ');
   }
@@ -183,6 +219,10 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
       if (now < due) continue;
       const jitter = 0.75 + Math.random() * 0.5;
       nextNudgeAt.set(peer.name, now + intervalMin * 60_000 * jitter);
+      // While the pet is watching the screen, the vision commentary loop
+      // replaces plain free-will nudges (the schedule above still advances,
+      // so there is no nudge burst when the grant expires).
+      if (deps.visionActive(peer.name)) continue;
       if (!peer.isConnected()) {
         // Free will may open a connection, but never at another pet's expense.
         if (deps.liveCount() >= MAX_LIVE_FOR_FREE_WILL_CONNECT) continue;
@@ -193,7 +233,12 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
         }
       }
       try {
-        peer.pushContext(await ambientText(peer, settings), 'auto');
+        const count = (nudgeCounts.get(peer.name) ?? 0) + 1;
+        nudgeCounts.set(peer.name, count);
+        // Every ~4th nudge forces a reply so free will stays audibly alive
+        // instead of the model electing silence every time.
+        const forced = count % FORCED_NUDGE_EVERY === 0;
+        peer.pushContext(await ambientText(peer, settings, forced), forced ? 'true' : 'auto');
       } catch {
         // Ambient chatter must never surface errors.
       }

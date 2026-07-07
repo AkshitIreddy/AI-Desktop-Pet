@@ -153,7 +153,10 @@ export function SkillWheel({ petName }: { petName: string }) {
       store: appStore,
       ui: overlayUi,
     }).finally(() => setBump((b) => b + 1));
-    if (def.kind === 'action') overlayUi.closeWheel();
+    // Auto-close covers toggles too — the toast/status conveys the new state.
+    // With it off, the wheel stays open so skills can be chained (panels that
+    // a skill opens still dismiss it via overlayUi.open*).
+    if (settings.autoCloseWheelOnSelect) overlayUi.closeWheel();
     else setBump((b) => b + 1);
   };
 

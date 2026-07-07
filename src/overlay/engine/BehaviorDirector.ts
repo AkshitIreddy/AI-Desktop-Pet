@@ -5,24 +5,26 @@
  * variety de-weighting, personal space, pins, skill-driven behaviors,
  * reactive events) happens here.
  */
+import { SKILLS } from '../../skills/registry';
+import { skillParam } from '../../shared/types';
 import type { CharacterRecord, AppSettings, Platform, SkillId } from '../../shared/types';
 import type { DirectorApi, DirectorEvent, OverlayEnv, PetHandle } from './api';
 import {
   BEHAVIORS,
   BEHAVIORS_BY_ID,
+  leavePlatform,
   wait,
   type BehaviorCtx,
   type BehaviorDef,
   type DirectorLink,
 } from './behaviors';
 import { hitRegionRegistry } from './hitRegions';
+import { monitorOf, primaryMonitor, sameMonitor } from './monitors';
 import { onWindowAppeared, startPlatforms, windowTitle } from './platforms';
 import { climbEligible, Pet, THROW_SPEED } from './PetEngine';
 
 /** Hit-region padding around each pet's bbox (logical px). */
 const PET_HIT_PAD = 10;
-/** hide-skill duration. */
-const HIDE_MS = 15 * 60_000;
 /** Personal space: overlap fraction / dwell before a sidestep. */
 const OVERLAP_FRACTION = 0.4;
 const OVERLAP_DWELL_MS = 2_000;
@@ -218,13 +220,18 @@ class Director implements DirectorLink, DirectorHandle {
       return false;
     });
 
-    // new-window-curiosity: nearest free pet investigates
+    // new-window-curiosity: nearest free pet ON THE WINDOW'S MONITOR
+    // investigates (pets never leave their screen for a curiosity trip)
     if (this.windowQueue.length && this.env.settings.windowWalking) {
       const p = this.windowQueue.shift();
       if (p) {
         const cx = (p.left + p.right) / 2;
         const candidates = [...this.petsMap.values()]
-          .filter((q) => this.isFree(q))
+          .filter((q) => {
+            if (!this.isFree(q)) return false;
+            const m = monitorOf(this.env, q);
+            return p.right > m.left && p.left < m.right;
+          })
           .sort(
             (a, b) =>
               Math.abs(a.x + a.size / 2 - cx) - Math.abs(b.x + b.size / 2 - cx),
@@ -303,12 +310,19 @@ class Director implements DirectorLink, DirectorHandle {
             if (meta && this.isFree(later) && now > meta.sidestepAt) {
               let dir = later.x + later.size / 2 >= other.x + other.size / 2 ? 1 : -1;
               const step = 60 + Math.random() * 60;
-              const maxX = Math.max(0, this.env.width - later.size);
+              // Sidesteps stay on the pet's own monitor.
+              const m = monitorOf(this.env, later);
+              const maxX = Math.max(m.left, m.right - later.size);
               // Stacked at a screen edge — step inward instead of into the wall.
-              if ((dir > 0 && later.x + step > maxX) || (dir < 0 && later.x - step < 0)) {
+              if (
+                (dir > 0 && later.x + step > maxX) ||
+                (dir < 0 && later.x - step < m.left)
+              ) {
                 dir = -dir;
               }
-              void later.walkTo(later.x + dir * step);
+              void later.walkTo(
+                Math.min(Math.max(later.x + dir * step, m.left), maxX),
+              );
               meta.sidestepAt = now + SIDESTEP_COOLDOWN_MS;
             }
             this.overlapSince.delete(key);
@@ -393,8 +407,14 @@ class Director implements DirectorLink, DirectorHandle {
       if (!partner) return false;
       participants.push(partner);
     } else if (def.participants === 'all') {
+      // Group behaviors gather everyone on the initiator's monitor only —
+      // pets on other screens keep to themselves.
+      const cx = pet.x + pet.size / 2;
       const others = [...this.petsMap.values()].filter(
-        (p) => p !== pet && this.isFree(p),
+        (p) =>
+          p !== pet &&
+          this.isFree(p) &&
+          sameMonitor(this.env, cx, p.x + p.size / 2),
       );
       if (!others.length) return false;
       participants.push(...others);
@@ -488,16 +508,22 @@ class Director implements DirectorLink, DirectorHandle {
         break;
       case 'teleport-home': {
         this.abortFor(pet);
-        const hx = (pet.rec.homeX ?? 0.5) * this.env.width - pet.size / 2;
-        pet.teleport(hx, this.env.height - pet.size);
+        // homeX is a fraction of the PRIMARY monitor's width.
+        const pm = primaryMonitor(this.env);
+        const hx =
+          pm.left + (pet.rec.homeX ?? 0.5) * (pm.right - pm.left) - pet.size / 2;
+        pet.teleport(hx, pm.floorY - pet.size);
         this.emit({ type: 'behavior-start', pet: petName, behavior: 'teleport-home' });
         this.emit({ type: 'behavior-end', pet: petName, behavior: 'teleport-home' });
         break;
       }
-      case 'hide':
+      case 'hide': {
         this.abortFor(pet);
-        pet.hide(HIDE_MS); // emits 'hidden' now, 'returned' later
+        // Per-character override of the hide duration (skillSettings).
+        const minutes = skillParam(pet.rec, 'hide', SKILLS['hide'], 'minutes');
+        pet.hide(Math.max(1, minutes) * 60_000); // emits 'hidden' now, 'returned' later
         break;
+      }
       case 'do-a-trick':
         this.runOneShot(pet, 'do-a-trick', async () => {
           await pet.playSpecial();
@@ -733,14 +759,23 @@ class Director implements DirectorLink, DirectorHandle {
   private runWalkMyWindow(pet: Pet): void {
     // list_windows is z-ordered top-first, so the first climbable window
     // platform belongs to the user's focused/top-most reachable window.
-    const p = this.env.platforms.find((q) => climbEligible(q, this.env.height));
+    // Prefer one on the pet's own monitor; fall back to any (explicit skill).
+    const m = monitorOf(this.env, pet);
+    const eligible = this.env.platforms.filter((q) => climbEligible(q, this.env));
+    const p =
+      eligible.find((q) => q.right > m.left && q.left < m.right) ?? eligible[0];
     if (!p) return;
     this.runOneShot(pet, 'walk-my-window', async (signal) => {
       const mid = (p.left + p.right) / 2 - pet.size / 2;
       if (!(await pet.climbToPlatform(p)) || signal.aborted) return;
       if (!(await pet.walkTo(p.right - pet.size)) || signal.aborted) return;
       if (!(await pet.walkTo(p.left)) || signal.aborted) return;
-      await pet.walkTo(mid);
+      if (!(await pet.walkTo(mid)) || signal.aborted) return;
+      await wait(600, signal);
+      if (signal.aborted) return;
+      // E3: leave the window like the ambient behaviors do — randomly walk
+      // off the edge or climb back down the side.
+      await leavePlatform(pet, signal);
     });
   }
 
@@ -773,12 +808,16 @@ class Director implements DirectorLink, DirectorHandle {
     );
   }
 
+  /** Nearest free partner ON THE SAME MONITOR (joint behaviors stay local). */
   private nearestFreeOther(pet: Pet): Pet | undefined {
+    const cx = pet.x + pet.size / 2;
     let best: Pet | undefined;
     let bestDist = Infinity;
     for (const p of this.petsMap.values()) {
       if (p === pet || !this.isFree(p)) continue;
-      const d = Math.abs(p.x + p.size / 2 - (pet.x + pet.size / 2));
+      const pcx = p.x + p.size / 2;
+      if (!sameMonitor(this.env, cx, pcx)) continue;
+      const d = Math.abs(pcx - cx);
       if (d < bestDist) {
         bestDist = d;
         best = p;

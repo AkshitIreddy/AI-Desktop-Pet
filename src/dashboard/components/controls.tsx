@@ -308,7 +308,7 @@ export function SectionCard(props: {
 
 /** Label + hint on the left, control on the right. */
 export function FieldRow(props: {
-  label: string;
+  label: ReactNode;
   hint?: ReactNode;
   children: ReactNode;
   wide?: boolean;

@@ -5,8 +5,14 @@
  * `characters-changed` / applies `settings-changed` payloads directly).
  */
 import { LazyStore } from '@tauri-apps/plugin-store';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import defaultCharacters from './characters.default.json';
-import { DEFAULT_SETTINGS, DEFAULT_SKILL_LOADOUT, SCHEMA_VERSION } from './constants';
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_SKILL_LOADOUT,
+  LEGACY_DEFAULT_BUMPS,
+  SCHEMA_VERSION,
+} from './constants';
 import { ipc } from './ipc';
 import type {
   AnimationConfig,
@@ -64,7 +70,9 @@ export class AppStore {
    */
   async load(opts?: { init?: boolean }): Promise<PersistedState> {
     const existing = await this.store.get<PersistedState>(KEY);
-    if (existing && existing.schemaVersion === SCHEMA_VERSION) {
+    if (existing && existing.characters && existing.settings) {
+      // Any prior schema version upgrades in place via mergeDefaults — never
+      // wipe a user's data because SCHEMA_VERSION moved.
       this.state = this.mergeDefaults(existing);
     } else {
       this.state = {
@@ -88,6 +96,10 @@ export class AppStore {
   /** Keep old installs working when new settings/character fields appear. */
   private mergeDefaults(loaded: PersistedState): PersistedState {
     const settings: AppSettings = { ...DEFAULT_SETTINGS, ...loaded.settings };
+    // Stored values still equal to an old default follow the new default.
+    for (const bump of LEGACY_DEFAULT_BUMPS) {
+      if (settings[bump.key] === bump.from) settings[bump.key] = bump.to;
+    }
     const characters: Record<string, CharacterRecord> = {};
     const defaults = buildDefaultCharacters();
     for (const [name, def] of Object.entries(defaults)) {
@@ -121,8 +133,11 @@ export class AppStore {
       const legacy = await ipc.readLegacyConfig();
       if (!legacy) return;
       const apiKey = legacy['apiKey'];
-      if (typeof apiKey === 'string' && apiKey) {
-        this.state.settings.apiKey = apiKey;
+      // Import only values that actually look like a Convai API key — v1
+      // config files can hold junk here, which would show up in Settings as
+      // a mystery key that was never the user's.
+      if (typeof apiKey === 'string' && /^[0-9a-f]{32}$/i.test(apiKey.trim())) {
+        this.state.settings.apiKey = apiKey.trim();
       }
       const chars = legacy['characters'] as
         | Record<string, { id?: string; spawn?: boolean; archived?: boolean }>
@@ -172,6 +187,20 @@ export class AppStore {
     return this.state.settings;
   }
 
+  /** Reset every setting to defaults, keeping identity (api key, end-user id). */
+  async resetSettings(): Promise<AppSettings> {
+    await this.sync();
+    const { apiKey, endUserId } = this.state.settings;
+    this.state.settings = {
+      ...DEFAULT_SETTINGS,
+      apiKey,
+      endUserId,
+      showOnboarding: false,
+    };
+    await this.persist();
+    return this.state.settings;
+  }
+
   /* ------------------------------ characters ------------------------------ */
 
   get characters(): CharacterRecord[] {
@@ -208,7 +237,7 @@ export class AppStore {
     displayName: string,
     convaiId: string,
     animation: AnimationConfig,
-    spriteSource: string,
+    sprites: { spriteSource?: string; spriteDir?: string },
   ): Promise<CharacterRecord> {
     await this.sync();
     let name = sanitizeName(displayName);
@@ -226,8 +255,9 @@ export class AppStore {
       voiceEnabled: true,
       skillLoadout: [...DEFAULT_SKILL_LOADOUT],
       animation,
-      spriteSource,
-    } as CharacterRecord & { spriteSource: string };
+      spriteSource: sprites.spriteSource,
+      spriteDir: sprites.spriteDir,
+    };
     this.state.characters[name] = rec;
     await this.persist();
     return rec;
@@ -297,7 +327,19 @@ export class AppStore {
 
 /** Sprite folder for a character (user-added ones reuse a bundled sprite set). */
 export function spriteFolder(rec: CharacterRecord): string {
-  return (rec as CharacterRecord & { spriteSource?: string }).spriteSource ?? rec.name;
+  return rec.spriteSource ?? rec.name;
+}
+
+/**
+ * URL for a sprite frame file. Custom imported sets live on disk and are
+ * served through the asset protocol; bundled sets come from /assets.
+ */
+export function spriteUrl(rec: CharacterRecord, file: string): string {
+  if (rec.spriteDir) {
+    const sep = rec.spriteDir.includes('\\') ? '\\' : '/';
+    return convertFileSrc(`${rec.spriteDir}${sep}${file}`);
+  }
+  return `/assets/${spriteFolder(rec)}/${file}`;
 }
 
 export const appStore = new AppStore();

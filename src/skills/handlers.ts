@@ -11,6 +11,7 @@ import { SKILLS } from './registry';
 import { ipc } from '../shared/ipc';
 import { sounds } from '../shared/sounds';
 import type { AppStore } from '../shared/store';
+import { skillParam } from '../shared/types';
 import type { SkillId } from '../shared/types';
 import type { DirectorApi, PetHandle } from '../overlay/engine/api';
 import type { ConvaiLayer } from '../overlay/convai/api';
@@ -43,9 +44,8 @@ export function messageOf(err: unknown): string {
 const staying = new Set<string>();
 const following = new Set<string>();
 const whispering = new Set<string>();
-const pomodoros = new Map<string, { endsAt: number; timer: number }>();
+const pomodoros = new Map<string, { endsAt: number; timer: number; minutes: number }>();
 
-const POMODORO_MS = 25 * 60_000;
 const DANCE_PARTY_MS = 6_000;
 
 /** Runtime calls this when a pet despawns so toggles don't leak across spawns. */
@@ -146,7 +146,10 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
           ui.toast(`${rec.displayName} can no longer see your screen`, 'info');
         } else {
           await pc.ensureConnected();
-          const mins = store.state.settings.visionSessionMinutes;
+          // Per-character session length; falls back to the global setting.
+          const mins =
+            skillParam(rec, 'show-screen', SKILLS['show-screen'], 'minutes') ||
+            store.state.settings.visionSessionMinutes;
           await pc.grantVision(mins);
           ui.toast(`${rec.displayName} can see your screen for ${mins} min`, 'success');
         }
@@ -258,9 +261,14 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
         }
         following.delete(name); // director.runSkill('pomodoro') kills the follow-cursor loop
         director.runSkill(name, 'pomodoro'); // abort running behavior + pin + sit
-        const timer = window.setTimeout(() => finishPomodoro(ctx), POMODORO_MS);
-        pomodoros.set(name, { endsAt: Date.now() + POMODORO_MS, timer });
-        ui.toast(`Focus time — ${rec.displayName} will sit with you for 25 minutes`, 'success');
+        const minutes = skillParam(rec, 'pomodoro', SKILLS['pomodoro'], 'minutes') || 25;
+        const ms = minutes * 60_000;
+        const timer = window.setTimeout(() => finishPomodoro(ctx), ms);
+        pomodoros.set(name, { endsAt: Date.now() + ms, timer, minutes });
+        ui.toast(
+          `Focus time — ${rec.displayName} will sit with you for ${minutes} minutes`,
+          'success',
+        );
         break;
       }
 
@@ -324,11 +332,16 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
         director.runSkill(name, 'teleport-home');
         break;
 
-      case 'hide':
+      case 'hide': {
         following.delete(name); // followLoop self-exits when the pet hides
-        director.runSkill(name, 'hide');
-        ui.toast(`${rec.displayName} will be back in 15 minutes`, 'info');
+        director.runSkill(name, 'hide'); // duration param is read engine-side
+        const hideMins = skillParam(rec, 'hide', SKILLS['hide'], 'minutes') || 15;
+        ui.toast(
+          `${rec.displayName} will be back in ${hideMins} minute${hideMins === 1 ? '' : 's'}`,
+          'info',
+        );
         break;
+      }
 
       case 'do-a-trick':
         void pet.playSpecial().catch(() => {});
@@ -358,13 +371,15 @@ function cancelPomodoro(ctx: SkillContext): boolean {
 function finishPomodoro(ctx: SkillContext): void {
   const { pet, director, layer, store } = ctx;
   const name = pet.rec.name;
-  if (!pomodoros.delete(name)) return;
+  const session = pomodoros.get(name);
+  if (!session || !pomodoros.delete(name)) return;
+  const minutes = session.minutes;
   director.stopSkill(name, 'pomodoro'); // unpin + wake + celebrate one-shot
   sounds.play('complete');
   const displayName = store.state.characters[name]?.displayName ?? name;
   void notifyNative(
     'Focus session complete',
-    `25 minutes done — ${displayName} is proud of you!`,
+    `${minutes} minutes done — ${displayName} is proud of you!`,
   );
   if (store.state.settings.apiKey.trim()) {
     const pc = layer.forPet(name);
@@ -372,7 +387,7 @@ function finishPomodoro(ctx: SkillContext): void {
       .ensureConnected()
       .then(() =>
         pc.prompt(
-          'The 25-minute focus session you were keeping the user company for just ended. ' +
+          `The ${minutes}-minute focus session you were keeping the user company for just ended. ` +
             'Congratulate them warmly and briefly.',
         ),
       )

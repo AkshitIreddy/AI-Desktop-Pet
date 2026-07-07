@@ -1,16 +1,30 @@
 /**
  * ConvaiManager — per-pet ConvaiClient lifecycle + event fan-out.
  *
- * Each spawned pet gets a lazy client (created on first need, disconnected
- * after 5 min of inactivity). Global live connections are capped at 2 with
- * LRU eviction (GAP 7: concurrent-session limits per API key are unpublished;
- * crosstalk is the only flow that intentionally holds two). All SDK events
- * are fanned out as ConvaiStatus / ChatEntry / bubble streams for the UI.
+ * Each spawned pet gets a lazy client. Global live connections are capped at
+ * 3 with LRU eviction (GAP 7: concurrent-session limits per API key are
+ * unpublished; 3 lets two chatty pets + one crosstalk partner coexist without
+ * thrashing). All SDK events are fanned out as ConvaiStatus / ChatEntry /
+ * bubble streams for the UI.
+ *
+ * AUTO-CONNECT (settings.autoConnect, default ON):
+ *  - ensureSpawnedConnected() eagerly connects spawned pets (freeWill pets
+ *    claim slots first, then most recently active; the rest stay lazy).
+ *  - The 5-minute idle disconnect is disabled; instead a 60 s keep-alive
+ *    calls resetIdleTimer() on every live client, and 'idleWarning' always
+ *    resets, so sessions never idle out server-side.
+ *  - Unexpected disconnects (not client-initiated / eviction / auth-shaped)
+ *    auto-reconnect with 15 s → 60 s → 5 min backoff, forever while the pet
+ *    stays spawned.
+ * With autoConnect OFF everything behaves as before (lazy connect, 5-minute
+ * idle disconnect, reconnect only on demand).
  */
 import { MemoryManager } from '@convai/web-sdk/core';
 import type { ChatMessage, ConvaiClientState } from '@convai/web-sdk/core';
 import { AudioRenderer, ConvaiClient } from '@convai/web-sdk/vanilla';
 import { AppStore } from '../../shared/store';
+import { SKILLS } from '../../skills/registry';
+import { skillParam } from '../../shared/types';
 import type {
   AgentActivity,
   AppSettings,
@@ -24,30 +38,58 @@ import { createCrosstalk } from './crosstalk';
 import { createRemindersEngine } from './reminders';
 import { createVisionService, type VisionService } from './visionService';
 
-const MAX_LIVE_CONNECTIONS = 2;
+/** 3 = two chatty pets + one crosstalk partner never thrash (see header). */
+const MAX_LIVE_CONNECTIONS = 3;
 const IDLE_DISCONNECT_MS = 5 * 60_000;
 const BOT_READY_TIMEOUT_MS = 15_000;
 /** touchActivity within this window ≈ "the chat UI is open right now". */
 const CHAT_ACTIVE_WINDOW_MS = 45_000;
 const IDLE_RESET_THROTTLE_MS = 10_000;
 const MAX_LOCAL_USER_ENTRIES = 100;
+/** Server-side keep-alive cadence while autoConnect holds sessions open. */
+const KEEP_ALIVE_MS = 60_000;
+/** Auto-reconnect backoff after an unexpected disconnect (last step repeats forever). */
+const RECONNECT_BACKOFF_MS = [15_000, 60_000, 5 * 60_000];
+const MAX_NOTE_REACT_CHARS = 200;
+const RAW_DETAIL_MAX_CHARS = 140;
 
-function friendlyError(err: unknown, fallback: string): string {
+/** Single-line, length-capped raw error text for user-visible detail. */
+function rawDetail(err: unknown): string {
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
-  const m = raw.toLowerCase();
+  const flat = raw.replace(/\s+/g, ' ').trim();
+  return flat.length > RAW_DETAIL_MAX_CHARS ? `${flat.slice(0, RAW_DETAIL_MAX_CHARS)}…` : flat;
+}
+
+/**
+ * Friendly bucket text + the trimmed RAW detail so users see the exact error
+ * ("says internet not there instead of the exact error"). Buckets append the
+ * raw message in parentheses when it adds information; unknown errors return
+ * `<fallback>: <raw detail>`. Already-friendly messages (our own wrapped
+ * errors re-entering) pass through unchanged instead of double-wrapping.
+ */
+function friendlyError(err: unknown, fallback: string): string {
+  const detail = rawDetail(err);
+  const m = detail.toLowerCase();
+  const withDetail = (friendly: string): string => {
+    if (detail.length === 0) return friendly;
+    if (detail.includes(friendly)) return detail; // our own wrapper re-entering
+    return `${friendly} (${detail})`;
+  };
   if (/(401|403|api[ _-]?key|auth|unauthorized|forbidden)/.test(m)) {
-    return 'Check your API key in Settings.';
+    return withDetail('Check your API key in Settings.');
   }
   if (/(422|uuid|character)/.test(m)) {
-    return 'That Convai character ID looks wrong — double-check it in the dashboard.';
+    return withDetail('That Convai character ID looks wrong — double-check it in the dashboard.');
   }
   if (/(microphone|getusermedia|notallowed|device)/.test(m)) {
-    return 'Microphone unavailable — check Windows microphone privacy settings.';
+    return withDetail('Microphone unavailable — check Windows microphone privacy settings.');
   }
   if (/(network|fetch|offline|timed? ?out|unreachable|socket)/.test(m)) {
-    return 'Could not reach Convai — check your internet connection.';
+    return withDetail('Could not reach Convai — check your internet connection.');
   }
-  return fallback;
+  if (detail.length === 0) return fallback;
+  if (detail.includes(fallback)) return detail;
+  return `${fallback.replace(/[.…\s]+$/, '')}: ${detail}`;
 }
 
 /** DisconnectReason codes per SDK enum; null = clean/expected, no error toast. */
@@ -138,6 +180,14 @@ class PetSession implements PetConvai {
   private clientEpoch = 0;
   /** Set by dispose(); a disposed session must never reconnect. */
   private disposed = false;
+  /**
+   * True while a teardown WE initiated is in flight (explicit disconnect,
+   * eviction, identity reset) — the 'disconnect' event must not auto-reconnect
+   * then. Cleared at the start of the next connect attempt.
+   */
+  private intentionalDown = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
 
   private readonly store: AppStore;
   private readonly live: Set<PetSession>;
@@ -195,6 +245,8 @@ class PetSession implements PetConvai {
         this.setStatus({ visionActive: active, visionExpiresAt: expiresAt }),
       touch: () => this.touchActivity(),
       waitTurnEnd: (ms) => this.waitTurnEnd(ms),
+      chattiness: () =>
+        skillParam(this.rec(), 'show-screen', SKILLS['show-screen'], 'chattiness'),
     });
     this.peer = {
       name,
@@ -260,6 +312,9 @@ class PetSession implements PetConvai {
   }
 
   async disconnect(): Promise<void> {
+    // Explicit disconnect (user, eviction, teardown) — never auto-reconnect.
+    this.intentionalDown = true;
+    this.cancelReconnect();
     if (this.idleTimer !== null) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
@@ -388,6 +443,14 @@ class PetSession implements PetConvai {
       });
   }
 
+  reactToNote(noteText: string): void {
+    const t = noteText.replace(/\s+/g, ' ').trim().slice(0, MAX_NOTE_REACT_CHARS);
+    if (t.length === 0) return;
+    this.prompt(
+      `The user just pinned a sticky note that says: "${t}" — react in one short, in-character sentence.`,
+    );
+  }
+
   setVoiceEnabled(on: boolean): void {
     this.voiceOn = on;
     this.applyTts();
@@ -455,6 +518,21 @@ class PetSession implements PetConvai {
     if (!pinned) this.touchActivity();
   }
 
+  /**
+   * AutoConnect keep-alive (layer 60 s interval): ping the server-side idle
+   * timer directly. Deliberately does NOT bump lastActivity — keep-alives
+   * must not make an untouched pet look "recent" to LRU eviction.
+   */
+  serverKeepAlive(): void {
+    const c = this.client_;
+    if (c === null || !c.state.isConnected) return;
+    try {
+      c.resetIdleTimer();
+    } catch {
+      // Transport went away between checks; the disconnect handler takes over.
+    }
+  }
+
   /** Apply store changes: reconnectable config → drop; live knobs → adjust. */
   refreshFromStore(): void {
     const rec = this.store.state.characters[this.name];
@@ -463,6 +541,17 @@ class PetSession implements PetConvai {
     this.voiceOn = rec.voiceEnabled;
     this.applyTts();
     this.applyVolume();
+    // autoConnect toggled: OFF→ON drops the idle-disconnect timer, ON→OFF
+    // re-arms it so a live session picks the 5-minute policy back up.
+    if (this.autoConnectOn()) {
+      if (this.idleTimer !== null) {
+        clearTimeout(this.idleTimer);
+        this.idleTimer = null;
+      }
+    } else {
+      this.cancelReconnect();
+      if (this.isLive() && this.idleTimer === null) this.armIdleTimer();
+    }
     if (this.connSnap !== null) {
       const s = this.store.state.settings;
       if (
@@ -479,6 +568,8 @@ class PetSession implements PetConvai {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.intentionalDown = true;
+    this.cancelReconnect();
     await this.vision.dispose();
     if (this.idleTimer !== null) {
       clearTimeout(this.idleTimer);
@@ -521,6 +612,10 @@ class PetSession implements PetConvai {
   }
 
   private async doConnect(): Promise<void> {
+    // A fresh connect attempt begins a new "wanted up" period: unexpected
+    // drops after this point are eligible for auto-reconnect again.
+    this.intentionalDown = false;
+    this.cancelReconnect();
     // Guard against dispose()/resetClient() running while we are connecting:
     // any teardown bumps clientEpoch, and a stale connect must not resurrect
     // the session. obtainClient tears down the old client itself, so the
@@ -612,13 +707,14 @@ class PetSession implements PetConvai {
     }
     await bailIfStale(client);
     this.live.add(this);
+    this.reconnectAttempt = 0; // healthy again — future backoff starts at 15 s
     this.setStatus({ activity: activityFrom(client.state), error: null });
     this.applyTts();
     this.applyVolume();
     this.touchActivity();
   }
 
-  /** GAP 7 mitigation: at most 2 live connections; LRU-disconnect the rest. */
+  /** GAP 7 mitigation: at most MAX_LIVE_CONNECTIONS live; LRU-disconnect the rest. */
   private async evictForCapacity(): Promise<void> {
     while (this.live.size >= MAX_LIVE_CONNECTIONS && !this.live.has(this)) {
       const candidates = [...this.live].filter((s) => s !== this && !s.pinned);
@@ -784,10 +880,12 @@ class PetSession implements PetConvai {
         micOn: false,
         ...(msg !== null ? { error: msg } : {}),
       });
+      this.maybeScheduleReconnect(reason);
     });
     on('idleWarning', () => {
-      // Keep the session alive while the chat UI is actively in use.
-      if (Date.now() - this.lastActivity < CHAT_ACTIVE_WINDOW_MS) {
+      // With autoConnect the session must never idle out server-side;
+      // otherwise keep it alive only while the chat UI is actively in use.
+      if (this.autoConnectOn() || Date.now() - this.lastActivity < CHAT_ACTIVE_WINDOW_MS) {
         try {
           client.resetIdleTimer();
         } catch {
@@ -831,6 +929,9 @@ class PetSession implements PetConvai {
   }
 
   private async resetClient(): Promise<void> {
+    // Identity-level reset — the next connect is lazy, never a backoff retry.
+    this.intentionalDown = true;
+    this.cancelReconnect();
     // Identity-level reset ends the connection epoch — re-probe video next time.
     this.videoCapable = true;
     await this.vision.revoke();
@@ -838,17 +939,24 @@ class PetSession implements PetConvai {
     this.setStatus({ activity: 'disconnected', micOn: false });
   }
 
-  /* ------------------------------ idle disconnect ------------------------------ */
+  /* ------------------- idle disconnect & auto-reconnect ------------------- */
 
+  private autoConnectOn(): boolean {
+    return this.store.state.settings.autoConnect;
+  }
+
+  /** No-op while autoConnect is on — sessions are kept alive, never idled out. */
   private armIdleTimer(): void {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
     this.idleTimer = null;
+    if (this.autoConnectOn()) return;
     if (!this.isLive()) return;
     this.idleTimer = setTimeout(() => this.idleCheck(), IDLE_DISCONNECT_MS);
   }
 
   private idleCheck(): void {
     this.idleTimer = null;
+    if (this.autoConnectOn()) return; // toggled on since the timer was armed
     if (!this.isLive()) return;
     const idleFor = Date.now() - this.lastActivity;
     const busy = this.pinned || this.st.visionActive || this.st.micOn;
@@ -860,6 +968,45 @@ class PetSession implements PetConvai {
       () => this.idleCheck(),
       Math.max(10_000, IDLE_DISCONNECT_MS - idleFor),
     );
+  }
+
+  private cancelReconnect(): void {
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
+  /**
+   * Unexpected drop (not client-initiated/eviction, not auth-shaped) while
+   * autoConnect is on → retry at 15 s → 60 s → 5 min, then every 5 min
+   * forever while the pet stays spawned.
+   */
+  private maybeScheduleReconnect(reason: number): void {
+    if (this.disposed || this.intentionalDown || !this.autoConnectOn()) return;
+    // 1 CLIENT_INITIATED: we asked. 2 DUPLICATE_IDENTITY: connected elsewhere —
+    // reconnecting would boot that session. 7 JOIN_FAILURE: auth/config-shaped;
+    // retrying with the same key/id would fail identically forever.
+    if (reason === 1 || reason === 2 || reason === 7) return;
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null) return;
+    const delay =
+      RECONNECT_BACKOFF_MS[Math.min(this.reconnectAttempt, RECONNECT_BACKOFF_MS.length - 1)];
+    this.reconnectAttempt++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      const rec = this.rec();
+      if (this.disposed || this.intentionalDown || !this.autoConnectOn()) return;
+      if (!rec.spawned || rec.archived) return; // despawned while waiting
+      if (this.isLive()) return; // something else already reconnected us
+      this.ensureConnected().catch(() => {
+        // Still down (status error already set) — keep backing off, forever.
+        if (!this.disposed && !this.intentionalDown && this.autoConnectOn()) {
+          this.scheduleReconnect();
+        }
+      });
+    }, delay);
   }
 
   /* ------------------------------ chat + bubbles ------------------------------ */
@@ -1004,8 +1151,58 @@ export function createConvaiLayer(deps: AppStore | { store: AppStore }): ConvaiL
       store.characters.filter((r) => r.spawned && !r.archived).map((r) => forSession(r.name).peer),
     liveCount: () => live.size,
     isBusy,
+    visionActive: (name) => sessions.get(name)?.status().visionActive === true,
+    stats: () => ({
+      upcomingReminders: store.state.reminders.filter((r) => !r.fired).length,
+      notes: store.state.notes.length,
+    }),
   });
   bus.start();
+
+  // AutoConnect keep-alive: ping every live client's server-side idle timer
+  // so persistent sessions never idle out (the 5-minute local idle disconnect
+  // is disabled while autoConnect is on — see PetSession.armIdleTimer).
+  const keepAlive = setInterval(() => {
+    if (!store.state.settings.autoConnect) return;
+    for (const s of live) s.serverKeepAlive();
+  }, KEEP_ALIVE_MS);
+
+  const spawnedNames = (): string[] =>
+    store.characters.filter((r) => r.spawned && !r.archived).map((r) => r.name);
+
+  async function ensureSpawnedConnected(names: string[]): Promise<void> {
+    const settings = store.state.settings;
+    if (!settings.autoConnect) return;
+    // No key yet (first run): stay silent — doConnect would set a status
+    // error on every pet, which is noise before onboarding finishes.
+    if (settings.apiKey.trim().length === 0) return;
+    const recs = names
+      .map((n) => store.state.characters[n])
+      .filter(
+        (r): r is CharacterRecord =>
+          r !== undefined && r.spawned && !r.archived && r.convaiId.trim().length > 0,
+      );
+    // Cap-aware priority: freeWill pets first (they are the ones that go
+    // quiet when disconnected), then most recently active. The rest stay lazy.
+    recs.sort((a, b) => {
+      if (a.freeWill !== b.freeWill) return a.freeWill ? -1 : 1;
+      const la = sessions.get(a.name)?.lastActivity ?? 0;
+      const lb = sessions.get(b.name)?.lastActivity ?? 0;
+      return lb - la;
+    });
+    await Promise.allSettled(
+      recs.slice(0, MAX_LIVE_CONNECTIONS).map(
+        (r) => forSession(r.name).ensureConnected(), // failures: status error only
+      ),
+    );
+  }
+
+  // Boot auto-connect: the runtime also calls ensureSpawnedConnected on boot
+  // and spawn changes, but self-triggering here makes autoConnect robust even
+  // if a caller forgets. Small delay keeps overlay startup calm.
+  const bootTimer = setTimeout(() => {
+    void ensureSpawnedConnected(spawnedNames());
+  }, 1_500);
 
   const promptPet = (name: string, text: string): Promise<void> =>
     bus.prompt(forSession(name).peer, text);
@@ -1054,9 +1251,23 @@ export function createConvaiLayer(deps: AppStore | { store: AppStore }): ConvaiL
           s.refreshFromStore();
         }
       }
+      // Settings/characters may have just enabled autoConnect (or spawned a
+      // pet) — idempotent and cheap when everyone is already connected.
+      void ensureSpawnedConnected(spawnedNames());
+    },
+
+    ensureSpawnedConnected,
+
+    activeCandidates(): string[] {
+      return spawnedNames().sort(
+        (a, b) =>
+          (sessions.get(b)?.lastActivity ?? 0) - (sessions.get(a)?.lastActivity ?? 0),
+      );
     },
 
     async disposeAll(): Promise<void> {
+      clearTimeout(bootTimer);
+      clearInterval(keepAlive);
       bus.stop();
       crosstalk.stop();
       reminders.stop();

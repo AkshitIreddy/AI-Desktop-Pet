@@ -1,6 +1,7 @@
 mod capture;
 mod mic_permission;
 mod overlay;
+mod sprites;
 mod win_info;
 
 use serde::Serialize;
@@ -79,6 +80,95 @@ async fn get_work_area(app: AppHandle) -> Result<WorkArea, String> {
     primary_work_area(&app)
 }
 
+/// One physical monitor (all physical px, virtual-screen coordinates).
+/// Mirrors `MonitorInfo` in src/shared/types.ts.
+#[derive(Serialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorInfo {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub work_x: i32,
+    pub work_y: i32,
+    pub work_w: u32,
+    pub work_h: u32,
+    pub scale: f64,
+    pub primary: bool,
+}
+
+/// Union of all monitors' FULL bounds. Mirrors `VirtualScreen` in
+/// src/shared/types.ts. `scale` is the overlay window's DPI scale.
+#[derive(Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualScreen {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub scale: f64,
+    pub monitors: Vec<MonitorInfo>,
+}
+
+/// Enumerates all monitors and computes the virtual-screen union the overlay
+/// must cover. The union height gets the same 2px bottom shave as the
+/// work-area path (fullscreen-detection suppression — see primary_work_area).
+pub fn compute_virtual_screen(app: &AppHandle) -> Result<VirtualScreen, String> {
+    let scale = app
+        .get_webview_window("overlay")
+        .and_then(|w| w.scale_factor().ok())
+        .unwrap_or(1.0);
+
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    if monitors.is_empty() {
+        return Err("no monitors found".into());
+    }
+    let primary_pos = app
+        .primary_monitor()
+        .map_err(|e| e.to_string())?
+        .map(|m| *m.position());
+
+    let mut infos = Vec::with_capacity(monitors.len());
+    let (mut min_x, mut min_y) = (i32::MAX, i32::MAX);
+    let (mut max_x, mut max_y) = (i32::MIN, i32::MIN);
+
+    for m in &monitors {
+        let pos = m.position();
+        let size = m.size();
+        let wa = m.work_area();
+        min_x = min_x.min(pos.x);
+        min_y = min_y.min(pos.y);
+        max_x = max_x.max(pos.x + size.width as i32);
+        max_y = max_y.max(pos.y + size.height as i32);
+        infos.push(MonitorInfo {
+            x: pos.x,
+            y: pos.y,
+            w: size.width,
+            h: size.height,
+            work_x: wa.position.x,
+            work_y: wa.position.y,
+            work_w: wa.size.width,
+            work_h: wa.size.height,
+            scale: m.scale_factor(),
+            primary: primary_pos.is_some_and(|p| p == *pos),
+        });
+    }
+
+    Ok(VirtualScreen {
+        x: min_x,
+        y: min_y,
+        w: (max_x - min_x).max(0) as u32,
+        h: ((max_y - min_y).max(0) as u32).saturating_sub(2),
+        scale,
+        monitors: infos,
+    })
+}
+
+#[tauri::command]
+async fn get_monitors(app: AppHandle) -> Result<VirtualScreen, String> {
+    compute_virtual_screen(&app)
+}
+
 #[tauri::command]
 async fn show_main_window(app: AppHandle) {
     show_main(&app);
@@ -123,13 +213,19 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// Position the overlay to exactly cover the primary monitor's work area
-/// (leaves the taskbar clickable) and make it click-through until the cursor
-/// poller decides otherwise.
+/// Position the overlay to exactly cover the virtual-screen union of ALL
+/// monitors (pets can roam every screen; the frontend keeps per-monitor
+/// floors) and make it click-through until the cursor poller decides
+/// otherwise.
 fn setup_overlay(app: &AppHandle) -> tauri::Result<()> {
     let sandbox = sandbox_mode();
     if let Some(overlay) = app.get_webview_window("overlay") {
-        if let Ok(area) = primary_work_area(app) {
+        if let Ok(vs) = compute_virtual_screen(app) {
+            let x = if sandbox { vs.x - 30000 } else { vs.x };
+            let _ = overlay.set_position(PhysicalPosition::new(x, vs.y));
+            let _ = overlay.set_size(PhysicalSize::new(vs.w, vs.h));
+        } else if let Ok(area) = primary_work_area(app) {
+            // Fallback: at least cover the primary work area.
             let x = if sandbox { area.x - 30000 } else { area.x };
             let _ = overlay.set_position(PhysicalPosition::new(x, area.y));
             let _ = overlay.set_size(PhysicalSize::new(area.w, area.h));
@@ -143,22 +239,32 @@ fn setup_overlay(app: &AppHandle) -> tauri::Result<()> {
         if let Some(main) = app.get_webview_window("main") {
             let _ = main.hide();
         }
+        // Automated test runs must never play TTS/sfx out loud.
+        for label in ["overlay", "main"] {
+            if let Some(win) = app.get_webview_window(label) {
+                mic_permission::mute_webview(&win);
+            }
+        }
     }
     Ok(())
 }
 
-/// Re-applies overlay geometry after the work area changed (resolution, DPI,
-/// or taskbar move — detected by the cursor poll loop) and tells the overlay
-/// webview about the fresh work area. Mirrors setup_overlay's positioning,
-/// including the sandbox off-screen offset.
-fn resync_overlay(app: &AppHandle, area: WorkArea) {
+/// Re-applies overlay geometry after the monitor layout changed (resolution,
+/// DPI, monitor plug/unplug, or taskbar move — detected by the cursor poll
+/// loop) and tells the overlay webview about both the fresh primary work area
+/// (legacy consumers) and the full monitor layout. Mirrors setup_overlay's
+/// positioning, including the sandbox off-screen offset.
+pub fn resync_overlay(app: &AppHandle, vs: VirtualScreen) {
     let sandbox = sandbox_mode();
     if let Some(overlay) = app.get_webview_window("overlay") {
-        let x = if sandbox { area.x - 30000 } else { area.x };
-        let _ = overlay.set_position(PhysicalPosition::new(x, area.y));
-        let _ = overlay.set_size(PhysicalSize::new(area.w, area.h));
+        let x = if sandbox { vs.x - 30000 } else { vs.x };
+        let _ = overlay.set_position(PhysicalPosition::new(x, vs.y));
+        let _ = overlay.set_size(PhysicalSize::new(vs.w, vs.h));
     }
-    let _ = app.emit_to("overlay", "work-area-changed", area);
+    if let Ok(area) = primary_work_area(app) {
+        let _ = app.emit_to("overlay", "work-area-changed", area);
+    }
+    let _ = app.emit_to("overlay", "monitors-changed", vs);
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -202,6 +308,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(overlay::OverlayState::default())
         .invoke_handler(tauri::generate_handler![
             overlay::update_hit_regions,
@@ -212,7 +319,9 @@ pub fn run() {
             overlay::debug_overlay_state,
             win_info::list_windows,
             capture::capture_screen,
+            sprites::import_sprite_set,
             get_work_area,
+            get_monitors,
             show_main_window,
             read_legacy_config,
         ])

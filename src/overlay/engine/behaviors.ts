@@ -8,8 +8,18 @@
  * them; the director triggers them directly with a `data` payload.
  */
 import type { AppSettings, EdgeSide, Platform } from '../../shared/types';
-import type { DirectorApi, DirectorEvent, OverlayEnv, PetHandle } from './api';
+import type { DirectorApi, DirectorEvent, MonitorRegion, OverlayEnv, PetHandle } from './api';
 import { climbEligible } from './PetEngine';
+import {
+  MAX_HOP_STEP_UP,
+  leftmostMonitor,
+  monitorClampX,
+  monitorList,
+  monitorOf,
+  neighborMonitor,
+  rightmostMonitor,
+  touchesOuterEdge,
+} from './monitors';
 
 /** Directors expose emit() to behaviors (meet-and-greet broadcasts 'meet'). */
 export interface DirectorLink extends DirectorApi {
@@ -75,10 +85,17 @@ export function v1WalkDistance(width: number): number {
   return Math.floor(Math.random() * (width / 6)) + Math.floor(width / 6);
 }
 
-function windowPlatforms(env: OverlayEnv): Platform[] {
-  // Only windows a pet can calmly climb from the floor — hops were removed,
-  // so anything floating high above the floor is simply not walkable.
-  return env.platforms.filter((p) => climbEligible(p, env.height));
+/**
+ * Windows a pet can calmly climb from the floor (hops were removed, so
+ * anything floating high above its monitor's floor is not walkable). When a
+ * pet is given, only windows overlapping the pet's CURRENT monitor count —
+ * ambient behaviors never drag a pet onto another screen.
+ */
+function windowPlatforms(env: OverlayEnv, pet?: PetHandle): Platform[] {
+  const m = pet ? monitorOf(env, pet) : null;
+  return env.platforms.filter(
+    (p) => climbEligible(p, env) && (!m || (p.right > m.left && p.left < m.right)),
+  );
 }
 
 function center(p: PetHandle): number {
@@ -93,8 +110,30 @@ function pickOne<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function nearerSide(env: OverlayEnv, pet: PetHandle): EdgeSide {
-  return center(pet) < env.width / 2 ? 'left' : 'right';
+/**
+ * Which union-outer edges the pet's monitor owns (screen-edge climbing only
+ * exists on the leftmost monitor's left and the rightmost monitor's right).
+ */
+function reachableOuterSides(env: OverlayEnv, pet: PetHandle): Array<'left' | 'right'> {
+  const m = monitorOf(env, pet);
+  const sides: Array<'left' | 'right'> = [];
+  if (touchesOuterEdge(env, m, 'left')) sides.push('left');
+  if (touchesOuterEdge(env, m, 'right')) sides.push('right');
+  return sides;
+}
+
+function pickOuterSide(env: OverlayEnv, pet: PetHandle): EdgeSide | null {
+  const sides = reachableOuterSides(env, pet);
+  if (!sides.length) return null;
+  if (sides.length === 1) return sides[0];
+  const m = monitorOf(env, pet);
+  return center(pet) < (m.left + m.right) / 2 ? 'left' : 'right';
+}
+
+function outerEdgeX(env: OverlayEnv, side: EdgeSide, petSize: number): number {
+  return side === 'left'
+    ? leftmostMonitor(env).left
+    : rightmostMonitor(env).right - petSize;
 }
 
 function cursorMovedRecently(env: OverlayEnv, ms: number): boolean {
@@ -106,6 +145,28 @@ function cursorMovedRecently(env: OverlayEnv, ms: number): boolean {
 function cursorOnScreen(env: OverlayEnv): boolean {
   const c = env.cursor;
   return c.x >= 0 && c.x <= env.width && c.y >= 0 && c.y <= env.height;
+}
+
+/** Cursor inside the pet's own monitor (walk-to-cursor behaviors stay home). */
+function cursorOnPetMonitor(env: OverlayEnv, pet: PetHandle): boolean {
+  if (!cursorOnScreen(env)) return false;
+  const m = monitorOf(env, pet);
+  const c = env.cursor;
+  return c.x >= m.left && c.x < m.right && c.y >= m.top && c.y <= m.bottom;
+}
+
+/**
+ * E3 window dismount variety: when a window-top behavior finishes, randomly
+ * either climb back down the window's side (the mount in reverse) or do the
+ * classic walk-off-the-edge fall.
+ */
+export async function leavePlatform(pet: PetHandle, signal: AbortSignal): Promise<void> {
+  if (!signal.aborted && Math.random() < 0.5) {
+    if (await pet.dismountPlatform()) return;
+  }
+  if (signal.aborted) return;
+  pet.fall();
+  await settle(pet, signal);
 }
 
 /* --------------------------------- catalog --------------------------------- */
@@ -120,8 +181,12 @@ export const BEHAVIORS: BehaviorDef[] = [
     participants: 1,
     eligible: (_env, pet) => pet.grounded,
     run: async ({ env, pet }) => {
+      // Wander range is the pet's CURRENT monitor — a pet placed on screen 2
+      // stays on screen 2 (screen-hop is the only sanctioned crossing).
+      const m = monitorOf(env, pet);
       const dir = Math.random() < 0.5 ? -1 : 1;
-      await pet.walkTo(pet.x + dir * v1WalkDistance(env.width));
+      const target = pet.x + dir * v1WalkDistance(m.right - m.left);
+      await pet.walkTo(monitorClampX(m, target, pet.size));
     },
   },
 
@@ -132,16 +197,20 @@ export const BEHAVIORS: BehaviorDef[] = [
     cooldownMs: 20_000,
     locks: [],
     participants: 1,
-    eligible: (_env, pet) => pet.platform?.kind === 'floor',
+    // Climbable walls are the union's OUTER edges — the pet's monitor must
+    // own one (on a middle monitor of three there is nothing to climb).
+    eligible: (env, pet) =>
+      pet.platform?.kind === 'floor' && reachableOuterSides(env, pet).length > 0,
     run: async ({ env, pet, signal }) => {
-      const side = nearerSide(env, pet);
-      const edgeX = side === 'left' ? 0 : env.width - pet.size;
-      if (!(await pet.walkTo(edgeX)) || signal.aborted) return;
-      const reachedTop = await pet.climbEdge(side, 0);
+      const side = pickOuterSide(env, pet);
+      if (!side || side === 'top') return;
+      const edgeM = side === 'left' ? leftmostMonitor(env) : rightmostMonitor(env);
+      if (!(await pet.walkTo(outerEdgeX(env, side, pet.size))) || signal.aborted) return;
+      const reachedTop = await pet.climbEdge(side, edgeM.top);
       if (signal.aborted) return;
       if (reachedTop && Math.random() < 0.6) {
         // Traverse the top bar toward the middle (more coin flips inside).
-        await pet.climbEdge('top', env.width * rand(0.3, 0.7));
+        await pet.climbEdge('top', edgeM.left + (edgeM.right - edgeM.left) * rand(0.3, 0.7));
       }
       if (signal.aborted) return;
       if (!pet.grounded) pet.fall();
@@ -183,9 +252,9 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: ['window-walk'],
     participants: 1,
     gatedBy: 'windowWalking',
-    eligible: (env, pet) => pet.grounded && windowPlatforms(env).length > 0,
+    eligible: (env, pet) => pet.grounded && windowPlatforms(env, pet).length > 0,
     run: async ({ env, pet, signal, data }) => {
-      const plats = windowPlatforms(env);
+      const plats = windowPlatforms(env, pet);
       if (!plats.length) return;
       const p = (data as Platform | undefined) ?? pickOne(plats);
       const entry = p.left + (p.right - p.left) * rand(0.2, 0.8);
@@ -196,9 +265,7 @@ export const BEHAVIORS: BehaviorDef[] = [
         if (!(await pet.walkTo(target))) return;
         await wait(rand(400, 1200), signal);
       }
-      if (signal.aborted) return;
-      pet.fall();
-      await settle(pet, signal);
+      await leavePlatform(pet, signal);
     },
   },
 
@@ -210,9 +277,9 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: ['window-sit'],
     participants: 1,
     gatedBy: 'windowWalking',
-    eligible: (env, pet) => pet.grounded && windowPlatforms(env).length > 0,
+    eligible: (env, pet) => pet.grounded && windowPlatforms(env, pet).length > 0,
     run: async ({ env, pet, signal }) => {
-      const plats = windowPlatforms(env);
+      const plats = windowPlatforms(env, pet);
       if (!plats.length) return;
       const p = pickOne(plats);
       const leftCorner = Math.random() < 0.5;
@@ -222,9 +289,7 @@ export const BEHAVIORS: BehaviorDef[] = [
       await pet.playIdle();
       if (signal.aborted) return;
       await pet.playIdle();
-      if (signal.aborted) return;
-      pet.fall();
-      await settle(pet, signal);
+      await leavePlatform(pet, signal);
     },
   },
 
@@ -236,9 +301,9 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: [],
     participants: 1,
     gatedBy: 'windowWalking',
-    eligible: (env, pet) => pet.grounded && windowPlatforms(env).length > 0,
+    eligible: (env, pet) => pet.grounded && windowPlatforms(env, pet).length > 0,
     run: async ({ env, pet, signal }) => {
-      const plats = windowPlatforms(env);
+      const plats = windowPlatforms(env, pet);
       if (!plats.length) return;
       const p = pickOne(plats);
       const fromLeft = center(pet) < (p.left + p.right) / 2;
@@ -248,9 +313,7 @@ export const BEHAVIORS: BehaviorDef[] = [
       await wait(rand(1200, 2400), signal);
       if (signal.aborted) return;
       await pet.playIdle();
-      if (signal.aborted) return;
-      pet.fall();
-      await settle(pet, signal);
+      await leavePlatform(pet, signal);
     },
   },
 
@@ -264,12 +327,14 @@ export const BEHAVIORS: BehaviorDef[] = [
     gatedBy: 'cursorInteractions',
     eligible: (env, pet) =>
       pet.grounded &&
-      cursorOnScreen(env) &&
+      cursorOnPetMonitor(env, pet) &&
       cursorMovedRecently(env, 4_000) &&
       Math.abs(env.cursor.x - center(pet)) > 300,
     run: async ({ env, pet, signal }) => {
       const deadline = performance.now() + 6_000;
       while (!signal.aborted && performance.now() < deadline) {
+        // The cursor wandered off to another screen — give up politely.
+        if (!cursorOnPetMonitor(env, pet)) break;
         const dx = env.cursor.x - center(pet);
         if (Math.abs(dx) <= 60) break;
         // Chase in short segments so a moving cursor keeps re-aiming us.
@@ -310,7 +375,7 @@ export const BEHAVIORS: BehaviorDef[] = [
     gatedBy: 'cursorInteractions',
     eligible: (env, pet) =>
       pet.grounded &&
-      cursorOnScreen(env) &&
+      cursorOnPetMonitor(env, pet) &&
       env.cursor.lastMovedAt > 0 &&
       performance.now() - env.cursor.lastMovedAt > 5_000,
     run: async ({ env, pet, signal }) => {
@@ -333,15 +398,17 @@ export const BEHAVIORS: BehaviorDef[] = [
     eligible: (_env, pet) => pet.grounded,
     run: async ({ env, pet, partner, signal }) => {
       if (!partner) return;
+      // The director only pairs same-monitor pets; keep the stroll there too.
+      const m = monitorOf(env, pet);
       const gap = pet.size + 14;
-      const meetX = Math.min(Math.max(pet.x, 0), env.width - gap - partner.size);
+      const meetX = Math.min(Math.max(pet.x, m.left), m.right - gap - partner.size);
       await Promise.all([pet.walkTo(meetX), partner.walkTo(meetX + gap)]);
       if (signal.aborted) return;
-      const dir = meetX > env.width / 2 ? -1 : 1;
-      const dist = v1WalkDistance(env.width);
+      const dir = meetX > (m.left + m.right) / 2 ? -1 : 1;
+      const dist = v1WalkDistance(m.right - m.left);
       await Promise.all([
-        pet.walkTo(pet.x + dir * dist),
-        partner.walkTo(partner.x + dir * dist),
+        pet.walkTo(monitorClampX(m, pet.x + dir * dist, pet.size)),
+        partner.walkTo(monitorClampX(m, partner.x + dir * dist, partner.size)),
       ]);
     },
   },
@@ -385,15 +452,18 @@ export const BEHAVIORS: BehaviorDef[] = [
     run: async ({ env, pet, pets, signal }) => {
       const followers = pets.filter((p) => p !== pet);
       if (!followers.length) return;
+      const m = monitorOf(env, pet); // director reserves same-monitor pets
       for (let leg = 0; leg < 2 && !signal.aborted; leg++) {
-        const target = rand(0, Math.max(1, env.width - pet.size));
+        const target = rand(m.left, Math.max(m.left + 1, m.right - pet.size));
         const behind = target >= pet.x ? -1 : 1;
         await Promise.all<unknown>([
           pet.walkTo(target),
           ...followers.map(async (f, i) => {
             await wait(320 * (i + 1), signal);
             if (signal.aborted) return false;
-            return f.walkTo(target + behind * (i + 1) * (f.size * 0.9));
+            return f.walkTo(
+              monitorClampX(m, target + behind * (i + 1) * (f.size * 0.9), f.size),
+            );
           }),
         ]);
       }
@@ -428,21 +498,24 @@ export const BEHAVIORS: BehaviorDef[] = [
     participants: 'all',
     gatedBy: 'characterInteractions',
     eligible: (_env, pet, pets) => pet.grounded && pets.length >= 2,
-    run: async ({ env, pets, signal }) => {
+    run: async ({ env, pet, pets, signal }) => {
+      const m = monitorOf(env, pet); // parade spans the initiator's monitor
       const line = [...pets].sort((a, b) => a.x - b.x);
       const leftToRight = Math.random() < 0.5;
       const dir = leftToRight ? 1 : -1;
-      const startX = leftToRight ? 30 : env.width - 30 - line[0].size;
+      const startX = leftToRight ? m.left + 30 : m.right - 30 - line[0].size;
       await Promise.all(
-        line.map((p, i) => p.walkTo(startX + dir * i * (p.size + 16))),
+        line.map((p, i) =>
+          p.walkTo(monitorClampX(m, startX + dir * i * (p.size + 16), p.size)),
+        ),
       );
       if (signal.aborted) return;
-      const endX = leftToRight ? env.width - 60 - line[0].size : 60;
+      const endX = leftToRight ? m.right - 60 - line[0].size : m.left + 60;
       await Promise.all(
         line.map(async (p, i) => {
           await wait(i * 260, signal);
           if (signal.aborted) return false;
-          return p.walkTo(endX - dir * i * (p.size + 16));
+          return p.walkTo(monitorClampX(m, endX - dir * i * (p.size + 16), p.size));
         }),
       );
     },
@@ -455,18 +528,23 @@ export const BEHAVIORS: BehaviorDef[] = [
     cooldownMs: 60_000,
     locks: [],
     participants: 1,
-    eligible: (_env, pet) => pet.platform?.kind === 'floor',
+    eligible: (env, pet) =>
+      pet.platform?.kind === 'floor' && reachableOuterSides(env, pet).length > 0,
     run: async ({ env, pet, signal }) => {
-      const side = nearerSide(env, pet);
-      const edgeX = side === 'left' ? 0 : env.width - pet.size;
-      if (!(await pet.walkTo(edgeX)) || signal.aborted) return;
+      const side = pickOuterSide(env, pet);
+      if (!side || side === 'top') return;
+      const m = side === 'left' ? leftmostMonitor(env) : rightmostMonitor(env);
+      if (!(await pet.walkTo(outerEdgeX(env, side, pet.size))) || signal.aborted) return;
       // Stay below the midpoint so the v1 coin flip never triggers here.
-      if (!(await pet.climbEdge(side, env.height * 0.55)) || signal.aborted) return;
+      const partway = m.top + (m.floorY - m.top) * 0.55;
+      if (!(await pet.climbEdge(side, partway)) || signal.aborted) return;
       await wait(rand(500, 1100), signal);
       if (signal.aborted) return;
-      if (!(await pet.climbEdge(side, env.height - pet.size)) || signal.aborted) return;
+      if (!(await pet.climbEdge(side, m.floorY - pet.size)) || signal.aborted) return;
       const inward = side === 'left' ? 1 : -1;
-      await pet.walkTo(pet.x + inward * v1WalkDistance(env.width));
+      await pet.walkTo(
+        monitorClampX(m, pet.x + inward * v1WalkDistance(m.right - m.left), pet.size),
+      );
     },
   },
 
@@ -478,9 +556,9 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: [],
     participants: 1,
     gatedBy: 'windowWalking',
-    eligible: () => false, // director-triggered
+    eligible: () => false, // director-triggered (candidate pets share the monitor)
     run: async ({ env, pet, signal, data }) => {
-      const p = (data as Platform | undefined) ?? windowPlatforms(env)[0];
+      const p = (data as Platform | undefined) ?? windowPlatforms(env, pet)[0];
       if (!p) return;
       const cx = (p.left + p.right) / 2;
       if (!(await pet.walkTo(cx - pet.size / 2)) || signal.aborted) return;
@@ -551,7 +629,65 @@ export const BEHAVIORS: BehaviorDef[] = [
       await wait(300, signal);
     },
   },
+
+  /* 21 — RARE: hop across to the adjacent monitor (multi-monitor only).
+   * The pet walks to the shared boundary, takes an idle beat, then does ONE
+   * gentle low arc onto the neighbor's floor and resumes wandering there.
+   * The single sanctioned crossing between monitors — and deliberately rare
+   * so it never starves edge-climbs or the rest of the catalog. */
+  {
+    id: 'screen-hop',
+    weight: 0.25,
+    // Global spacing between hops of ANY pet; the 15-minute limit is
+    // enforced per-pet via lastScreenHopAt below.
+    cooldownMs: 60_000,
+    locks: [],
+    participants: 1,
+    eligible: (env, pet) => {
+      if (monitorList(env).length < 2) return false;
+      if (pet.platform?.kind !== 'floor') return false;
+      const last = lastScreenHopAt.get(pet.rec.name);
+      if (last !== undefined && performance.now() - last < SCREEN_HOP_PET_COOLDOWN_MS) {
+        return false;
+      }
+      return hopDirections(env, pet).length > 0;
+    },
+    run: async ({ env, pet, signal }) => {
+      const dirs = hopDirections(env, pet);
+      if (!dirs.length) return;
+      lastScreenHopAt.set(pet.rec.name, performance.now());
+      const dir = pickOne(dirs);
+      const m = monitorOf(env, pet);
+      // Stand flush against the shared boundary.
+      const standX = dir > 0 ? m.right - pet.size : m.left;
+      if (!(await pet.walkTo(standX)) || signal.aborted) return;
+      pet.face(dir > 0 ? 'right' : 'left');
+      await wait(rand(500, 1000), signal); // idle beat at the edge
+      if (signal.aborted) return;
+      if (!(await pet.hopAcross(dir)) || signal.aborted) return;
+      // Resume wandering on the new monitor.
+      const nm = monitorOf(env, pet);
+      await pet.walkTo(monitorClampX(nm, pet.x + dir * rand(60, 160), pet.size));
+    },
+  },
 ];
+
+/** screen-hop per-pet cooldown bookkeeping (15 min per pet). */
+const SCREEN_HOP_PET_COOLDOWN_MS = 15 * 60_000;
+const lastScreenHopAt = new Map<string, number>();
+
+/** Directions in which the pet's monitor has a hop-able neighbor floor. */
+function hopDirections(env: OverlayEnv, pet: PetHandle): Array<1 | -1> {
+  const m: MonitorRegion = monitorOf(env, pet);
+  const out: Array<1 | -1> = [];
+  for (const dir of [1, -1] as const) {
+    const n = neighborMonitor(env, m, dir);
+    // Lower/equal neighbor floors are always hop-able (the arc simply falls
+    // further); raised ones only within the small step the low arc clears.
+    if (n && m.floorY - n.floorY <= MAX_HOP_STEP_UP) out.push(dir);
+  }
+  return out;
+}
 
 export const BEHAVIORS_BY_ID: ReadonlyMap<string, BehaviorDef> = new Map(
   BEHAVIORS.map((b) => [b.id, b]),

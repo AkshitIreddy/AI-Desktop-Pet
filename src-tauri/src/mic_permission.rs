@@ -37,3 +37,24 @@ pub fn auto_grant_mic(window: &tauri::WebviewWindow) {
 
 #[cfg(not(windows))]
 pub fn auto_grant_mic(_window: &tauri::WebviewWindow) {}
+
+/// Hard-mute every sound a webview produces (TTS, sound effects). Used by the
+/// off-screen sandbox test mode so automated runs never play audio out loud
+/// on the user's machine.
+#[cfg(windows)]
+pub fn mute_webview(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
+    use windows::core::Interface;
+
+    let _ = window.with_webview(|webview| unsafe {
+        let Ok(core) = webview.controller().CoreWebView2() else {
+            return;
+        };
+        if let Ok(v8) = core.cast::<ICoreWebView2_8>() {
+            let _ = v8.SetIsMuted(true);
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn mute_webview(_window: &tauri::WebviewWindow) {}

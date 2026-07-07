@@ -46,6 +46,8 @@ interface DashboardState {
     patch: Partial<AppSettings>,
     onResult?: (ok: boolean) => void,
   ): void;
+  /** Reset every setting to defaults (keeps api key + end-user id). */
+  resetSettings(): Promise<void>;
   updateCharacter(
     name: string,
     patch: Partial<Omit<CharacterRecord, 'name'>>,
@@ -55,7 +57,7 @@ interface DashboardState {
     displayName: string,
     convaiId: string,
     animation: AnimationConfig,
-    spriteSource: string,
+    sprites: { spriteSource?: string; spriteDir?: string },
   ): Promise<CharacterRecord>;
   deleteCharacter(name: string): Promise<void>;
   regenerateEndUserId(): Promise<void>;
@@ -98,11 +100,8 @@ export const useDashboard = create<DashboardState>((set, get) => ({
   },
 
   async init() {
-    // TODO(integrator): drop the cast once shared/store.ts lands
-    // `load(opts?: { init?: boolean })` — the dashboard is the first-run owner.
-    const state = await (
-      appStore.load as (opts?: { init?: boolean }) => ReturnType<typeof appStore.load>
-    )({ init: true });
+    // The dashboard is the first-run owner (mints endUserId, persists defaults).
+    const state = await appStore.load({ init: true });
     applySettingsSideEffects(state.settings);
     set({
       ready: true,
@@ -160,6 +159,20 @@ export const useDashboard = create<DashboardState>((set, get) => ({
     }, 150);
   },
 
+  async resetSettings() {
+    // Drop any pending debounced patch — it would resurrect pre-reset values.
+    window.clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+    const report = pendingOnResult;
+    pendingPatch = {};
+    pendingOnResult = undefined;
+    const settings = await appStore.resetSettings();
+    applySettingsSideEffects(settings);
+    set({ settings: { ...settings } });
+    report?.(true);
+    await notifySettingsChanged(settings);
+  },
+
   async updateCharacter(name, patch) {
     await appStore.updateCharacter(name, patch);
     set({ characters: snapshotCharacters() });
@@ -173,12 +186,12 @@ export const useDashboard = create<DashboardState>((set, get) => ({
     await notifyCharactersChanged();
   },
 
-  async addCharacter(displayName, convaiId, animation, spriteSource) {
+  async addCharacter(displayName, convaiId, animation, sprites) {
     const rec = await appStore.addCharacter(
       displayName,
       convaiId,
       animation,
-      spriteSource,
+      sprites,
     );
     set({ characters: snapshotCharacters() });
     await notifyCharactersChanged();

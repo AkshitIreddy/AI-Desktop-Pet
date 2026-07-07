@@ -7,6 +7,12 @@
  * the loop only redraws at the configured cadence. Timed grants auto-revoke;
  * `lookOnce` publishes for a single forced comment then unpublishes.
  * The webcam is NEVER enabled.
+ *
+ * WATCH PARTY: while a grant is active a commentary loop runs — every
+ * interval derived from the show-screen "chattiness" skill param
+ * (100→~45 s, 50→~2 min, 0→never) a visionTrigger nudges the character to
+ * react to the screen; every 3rd trigger is `must_respond` so she reliably
+ * pipes up. The interval is re-read each tick, so param edits apply live.
  */
 import type { ConvaiClient, VisionSourceHandle } from '@convai/web-sdk/core';
 import { ipc } from '../../shared/ipc';
@@ -21,6 +27,8 @@ export interface VisionHost {
   touch(): void;
   /** Resolves on the next turnEnd, or after timeoutMs. */
   waitTurnEnd(timeoutMs: number): Promise<void>;
+  /** show-screen "chattiness" skill param (0–100), re-read every commentary tick. */
+  chattiness(): number;
 }
 
 export interface VisionService {
@@ -37,6 +45,23 @@ const CAPTURE_QUALITY = 70;
 /** Time for the first published frame to actually flow before triggering. */
 const FIRST_FRAME_SETTLE_MS = 1200;
 const LOOK_RESPONSE_TIMEOUT_MS = 10_000;
+/** Soft watch-party nudge — the model may stay quiet if nothing changed. */
+const COMMENT_PROMPT =
+  "If something on the user's screen catches your eye, react to it briefly and in character. If nothing new, stay quiet.";
+/** Every 3rd commentary tick is must_respond — phrased so a reply makes sense. */
+const FORCED_COMMENT_PROMPT =
+  "React briefly and in character to whatever is most interesting on the user's screen right now.";
+const FORCED_COMMENT_EVERY = 3;
+
+/**
+ * Chattiness 0–100 → ms between watch-party comments (100→45 s, 50→2 min,
+ * ≤0→never). Linear: 45 s + 1.5 s per point below 100.
+ */
+export function commentaryIntervalMs(chattiness: number): number | null {
+  if (chattiness <= 0) return null;
+  const c = Math.min(100, chattiness);
+  return Math.round((45 + (100 - c) * 1.5) * 1000);
+}
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -55,6 +80,9 @@ export function createVisionService(host: VisionHost): VisionService {
   let loop: ReturnType<typeof setInterval> | null = null;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
   let expiresAt = 0;
+  /** Watch-party commentary loop (setTimeout chain; interval re-read each tick). */
+  let commentTimer: ReturnType<typeof setTimeout> | null = null;
+  let commentCount = 0;
 
   async function drawFrame(force = false): Promise<boolean> {
     while (inFlight !== null) {
@@ -91,6 +119,43 @@ export function createVisionService(host: VisionHost): VisionService {
     loop = null;
     if (expiryTimer !== null) clearTimeout(expiryTimer);
     expiryTimer = null;
+    if (commentTimer !== null) clearTimeout(commentTimer);
+    commentTimer = null;
+    commentCount = 0;
+  }
+
+  /** Watch party: periodic vision nudges while the grant streams frames. */
+  function scheduleCommentary(): void {
+    if (commentTimer !== null) clearTimeout(commentTimer);
+    commentTimer = null;
+    if (!active) return;
+    const ms = commentaryIntervalMs(host.chattiness());
+    if (ms === null) {
+      // Chattiness 0 → silent watching. Re-check occasionally so raising the
+      // param mid-grant brings the commentary back without a re-grant.
+      commentTimer = setTimeout(scheduleCommentary, 30_000);
+      return;
+    }
+    commentTimer = setTimeout(() => {
+      commentTimer = null;
+      if (!active) return;
+      const client = host.client();
+      if (client !== null && client.state.isConnected) {
+        commentCount++;
+        const forced = commentCount % FORCED_COMMENT_EVERY === 0;
+        try {
+          client.visionTrigger(
+            forced
+              ? { respondMode: 'must_respond', text: FORCED_COMMENT_PROMPT }
+              : { respondMode: 'auto', text: COMMENT_PROMPT },
+          );
+          host.touch();
+        } catch {
+          // Commentary is ambience; a missed trigger must never surface.
+        }
+      }
+      scheduleCommentary();
+    }, ms);
   }
 
   function armExpiry(): void {
@@ -141,6 +206,7 @@ export function createVisionService(host: VisionHost): VisionService {
       void drawFrame();
     }, Math.max(500, Math.round(1000 / fps)));
     armExpiry();
+    scheduleCommentary();
     host.setVisionStatus(true, expiresAt);
   }
 

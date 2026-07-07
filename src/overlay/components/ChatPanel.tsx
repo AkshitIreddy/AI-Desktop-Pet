@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { appStore, spriteFolder } from '../../shared/store';
+import { appStore, spriteUrl } from '../../shared/store';
 import { sounds } from '../../shared/sounds';
 import type { ChatEntry, ConvaiStatus } from '../../shared/types';
 import { messageOf } from '../../skills/handlers';
@@ -136,6 +136,11 @@ export function ChatPanel({ petName }: { petName: string }) {
         setConnError(null);
         pc.sendText(text);
         pc.touchActivity();
+        // Optional quick-fire mode: panel slips away right after a send —
+        // the small delay lets the send whoosh land before the exit motion.
+        if (settings.autoCloseChatOnSend) {
+          window.setTimeout(() => overlayUi.closeChat(), 250);
+        }
       })
       .catch((err) => setConnError(messageOf(err)));
   };
@@ -169,7 +174,7 @@ export function ChatPanel({ petName }: { petName: string }) {
       <header className="panel-header" {...headerProps}>
         <img
           className="chat-avatar"
-          src={`/assets/${spriteFolder(rec)}/walk1.png`}
+          src={spriteUrl(rec, 'walk1.png')}
           alt=""
           draggable={false}
         />

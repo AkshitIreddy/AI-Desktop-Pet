@@ -6,11 +6,13 @@
 import { motion } from 'framer-motion';
 import { useMemo, useState } from 'react';
 import { sounds } from '../../shared/sounds';
-import { spriteFolder } from '../../shared/store';
+import { spriteUrl } from '../../shared/store';
 import type { CharacterRecord, SkillId } from '../../shared/types';
+import { SKILLS } from '../../skills/registry';
 import { CONVAI_ID_RE, useDashboard } from '../state';
-import { ConfirmDialog, Toggle } from './controls';
+import { ConfirmDialog, SkillIcon, Toggle } from './controls';
 import { LtmWarningModal } from './LtmWarningModal';
+import { SkillParamsButton } from './SkillParams';
 import { LoadoutEditor } from './SkillPicker';
 
 interface Draft {
@@ -21,9 +23,14 @@ interface Draft {
   longTermMemory: boolean;
   skillLoadout: SkillId[];
   homeX: number | undefined;
+  skillSettings: Partial<Record<SkillId, Record<string, number>>>;
 }
 
 function toDraft(rec: CharacterRecord): Draft {
+  const skillSettings: Draft['skillSettings'] = {};
+  for (const [id, params] of Object.entries(rec.skillSettings ?? {})) {
+    skillSettings[id as SkillId] = { ...params };
+  }
   return {
     displayName: rec.displayName,
     convaiId: rec.convaiId,
@@ -32,6 +39,7 @@ function toDraft(rec: CharacterRecord): Draft {
     longTermMemory: rec.longTermMemory,
     skillLoadout: [...rec.skillLoadout],
     homeX: rec.homeX,
+    skillSettings,
   };
 }
 
@@ -72,6 +80,7 @@ export function CharacterEditor(props: { rec: CharacterRecord; onClose: () => vo
       longTermMemory: draft.longTermMemory,
       skillLoadout: draft.skillLoadout,
       homeX: draft.homeX,
+      skillSettings: draft.skillSettings,
     });
     sounds.play('complete');
     toast(`${draft.displayName.trim()} saved.`, 'success');
@@ -79,7 +88,17 @@ export function CharacterEditor(props: { rec: CharacterRecord; onClose: () => vo
   };
 
   const homePct = Math.round((draft.homeX ?? 0.5) * 100);
-  const folder = spriteFolder(rec);
+  const walkSprite = spriteUrl(rec, 'walk1.png');
+  const paramSkills = draft.skillLoadout.filter((id) => SKILLS[id].params?.length);
+
+  const setParam = (skill: SkillId, key: string, value: number) =>
+    setDraft((d) => ({
+      ...d,
+      skillSettings: {
+        ...d.skillSettings,
+        [skill]: { ...(d.skillSettings[skill] ?? {}), [key]: value },
+      },
+    }));
 
   return (
     <>
@@ -102,7 +121,7 @@ export function CharacterEditor(props: { rec: CharacterRecord; onClose: () => vo
         transition={{ type: 'spring', stiffness: 360, damping: 36 }}
       >
         <header className="cdp-slideover-head">
-          <img src={`/assets/${folder}/walk1.png`} alt="" draggable={false} />
+          <img src={walkSprite} alt="" draggable={false} />
           <h2>{rec.displayName}</h2>
           {dirty && <span className="cdp-dirty-dot" title="Unsaved changes" />}
           <button
@@ -227,7 +246,7 @@ export function CharacterEditor(props: { rec: CharacterRecord; onClose: () => vo
             </div>
             <div className="cdp-home-strip" aria-hidden>
               <img
-                src={`/assets/${folder}/walk1.png`}
+                src={walkSprite}
                 alt=""
                 draggable={false}
                 style={{ left: `${homePct}%` }}
@@ -245,6 +264,31 @@ export function CharacterEditor(props: { rec: CharacterRecord; onClose: () => vo
               loadout={draft.skillLoadout}
               onChange={(next) => patch({ skillLoadout: next })}
             />
+
+            {paramSkills.length > 0 && (
+              <div className="cdp-loadout-params">
+                <span className="cdp-field-hint" style={{ display: 'block', margin: '14px 0 8px' }}>
+                  Tunable skills in this loadout — saved with this character.
+                </span>
+                {paramSkills.map((id) => {
+                  const def = SKILLS[id];
+                  return (
+                    <div key={id} className="cdp-loadout-param-row">
+                      <span className="icon" aria-hidden>
+                        <SkillIcon icon={def.icon} size={15} />
+                      </span>
+                      <span className="label">{def.label}</span>
+                      <SkillParamsButton
+                        def={def}
+                        values={draft.skillSettings[id]}
+                        subtitle={`for ${draft.displayName || rec.displayName}`}
+                        onSave={(key, value) => setParam(id, key, value)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Danger zone */}

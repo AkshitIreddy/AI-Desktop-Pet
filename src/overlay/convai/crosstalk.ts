@@ -134,6 +134,9 @@ export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
       if (running || a === b) return;
       if (inQuietHours(deps.getSettings())) return;
       if (!deps.isSpawned(a) || !deps.isSpawned(b)) return;
+      // Watch party takes precedence: a pet with an active vision grant is
+      // busy commentating on the user's screen and skips crosstalk pairing.
+      if (deps.forPet(a).status().visionActive || deps.forPet(b).status().visionActive) return;
       running = true;
       stopped = false;
       try {

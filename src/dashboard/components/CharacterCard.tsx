@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { spriteFolder } from '../../shared/store';
+import { spriteUrl } from '../../shared/store';
 import type { CharacterRecord } from '../../shared/types';
 import { useDashboard } from '../state';
 import { Toggle } from './controls';
@@ -30,7 +30,7 @@ export function CharacterCard(props: {
     >
       <div className="cdp-char-preview">
         <img
-          src={`/assets/${spriteFolder(rec)}/walk1.png`}
+          src={spriteUrl(rec, 'walk1.png')}
           alt={`${rec.displayName} sprite`}
           draggable={false}
           loading="lazy"

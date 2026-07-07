@@ -17,6 +17,26 @@ import type {
   SkillId,
 } from '../../shared/types';
 
+/**
+ * One monitor of the virtual screen in LOGICAL overlay coordinates.
+ * The runtime converts these from the Rust `VirtualScreen`/`MonitorInfo`
+ * shapes (physical px) at boot and on `monitors-changed`.
+ */
+export interface MonitorRegion {
+  left: number;
+  right: number;
+  top: number;
+  /** Bottom of the monitor bounds (may sit below the walkable floor). */
+  bottom: number;
+  /** Walkable floor: this monitor's WORK-AREA bottom (excludes taskbar). */
+  floorY: number;
+  /**
+   * OS primary monitor (homeX / spawn anchor). Optional so the runtime can
+   * fill entries progressively; when absent the first entry is used.
+   */
+  primary?: boolean;
+}
+
 export interface OverlayEnv {
   /** Overlay size in logical px. */
   width: number;
@@ -30,6 +50,14 @@ export interface OverlayEnv {
   cursor: { x: number; y: number; lastMovedAt: number };
   /** Walkable platforms derived from native windows (refreshed ~500 ms). */
   platforms: Platform[];
+  /**
+   * Per-monitor regions (logical overlay coords), converted from
+   * `ipc.getMonitors()` by the runtime. An EMPTY array means "treat the whole
+   * overlay as one monitor" — the engine falls back to
+   * `{0..width, 0..height, floorY: height}` so a not-yet-updated runtime
+   * keeps the exact single-monitor behavior.
+   */
+  monitors: MonitorRegion[];
   settings: AppSettings;
 }
 
@@ -77,6 +105,19 @@ export interface PetHandle {
   climbToPlatform(p: Platform, side?: 'left' | 'right'): Promise<boolean>;
   /** @deprecated Ballistic hops were removed — delegates to climbToPlatform. */
   hopToPlatform(p: Platform, x: number): Promise<boolean>;
+  /**
+   * Reverse a window mount: walk to the near top corner, climb down the
+   * window's side border to the floor, then step off. False when the pet is
+   * not standing on a window platform (or the window vanished mid-climb).
+   */
+  dismountPlatform(): Promise<boolean>;
+  /**
+   * screen-hop only: ONE gentle low arc across the boundary onto the
+   * horizontally adjacent monitor's floor (rise ≤ 60 px, forward ≤ 120 px).
+   * This is the single sanctioned exception to the no-ballistic-hops rule.
+   * False when there is no passable neighbor in that direction.
+   */
+  hopAcross(dir: 1 | -1): Promise<boolean>;
   playIdle(): Promise<void>;
   playSpecial(name?: string): Promise<void>;
   face(dir: Facing): void;

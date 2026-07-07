@@ -10,6 +10,17 @@ import { hitRegionRegistry } from '../engine/hitRegions';
 import { overlayUi, runtime, useOverlayStore } from '../runtime';
 import { usePanelDrag } from './ChatPanel';
 
+/** Let the active pet comment on a freshly written sticky note (best-effort). */
+function reactToNote(text: string): void {
+  const name = runtime.getActivePet();
+  if (!name) return;
+  try {
+    runtime.layer.forPet(name).reactToNote(text);
+  } catch {
+    // A missing comment should never break note-taking.
+  }
+}
+
 const W = 360;
 const H = 480;
 
@@ -97,7 +108,10 @@ export function NotesBoard() {
                 autoFocus={!n.text}
                 onBlur={(e) => {
                   const v = e.target.value;
-                  if (v !== n.text) void appStore.updateNote(n.id, { text: v });
+                  if (v === n.text) return;
+                  void appStore.updateNote(n.id, { text: v });
+                  // First time this note gains content = "a note was added".
+                  if (v.trim() && !n.text.trim()) reactToNote(v.trim());
                 }}
               />
               <button

@@ -46,7 +46,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   petSize: 100,
   petOpacity: 100,
   animationSpeed: 1.0,
-  activityLevel: 55,
+  activityLevel: 70,
   windowWalking: true,
   cursorInteractions: true,
   characterInteractions: true,
@@ -57,7 +57,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceVolume: 80,
   sfxVolume: 60,
   soundPack: 'soft',
-  freeWillFrequency: 30,
+  freeWillFrequency: 55,
   quietHoursStart: '',
   quietHoursEnd: '',
   visionFps: 1,
@@ -66,7 +66,21 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autostart: false,
   reduceMotion: false,
   showOnboarding: true,
+  autoConnect: true,
+  autoCloseChatOnSend: true,
+  autoCloseWheelOnSelect: true,
+  hotkeys: {},
 };
+
+/** Old defaults that changed in 2.1 — stored values equal to these are bumped. */
+export const LEGACY_DEFAULT_BUMPS: Array<{
+  key: 'activityLevel' | 'freeWillFrequency';
+  from: number;
+  to: number;
+}> = [
+  { key: 'activityLevel', from: 55, to: 70 },
+  { key: 'freeWillFrequency', from: 30, to: 55 },
+];
 
 /** Base timing constants of the v1 shimeji engine (before animationSpeed scaling). */
 export const BASE_FRAME_MS = 200;

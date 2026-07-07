@@ -55,16 +55,19 @@ export function Sidebar(props: { page: PageId; onNavigate: (p: PageId) => void }
         {NAV.map((item) => {
           const active = item.id === page;
           return (
-            <button
+            <motion.button
               key={item.id}
               type="button"
               className="cdp-nav-item"
               data-active={active || undefined}
               aria-current={active ? 'page' : undefined}
               title={item.label}
+              // Press feedback lives on the icon only — the row itself never
+              // translates or indents, so text alignment stays rock solid.
+              whileTap="pressed"
               onClick={() => {
                 if (active) return;
-                sounds.play('hover');
+                sounds.play('select');
                 onNavigate(item.id);
               }}
             >
@@ -75,20 +78,26 @@ export function Sidebar(props: { page: PageId; onNavigate: (p: PageId) => void }
                   transition={SPRING}
                 />
               )}
-              <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.8}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-                dangerouslySetInnerHTML={{ __html: item.icon }}
-              />
+              <motion.span
+                className="cdp-nav-icon"
+                variants={{ pressed: { scale: 0.92 } }}
+                transition={SPRING}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                  dangerouslySetInnerHTML={{ __html: item.icon }}
+                />
+              </motion.span>
               <span>{item.label}</span>
-            </button>
+            </motion.button>
           );
         })}
       </nav>

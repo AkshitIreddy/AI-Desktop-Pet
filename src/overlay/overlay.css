@@ -73,6 +73,11 @@ body {
   display: block;
   width: 100%;
   height: 100%;
+  /* Never distort non-square shimeji frames; bottom-anchored inside the
+     square pet box so feet stay on the floor. Climb flips/rotations are a
+     transform on this img and operate on the contained result — safe. */
+  object-fit: contain;
+  object-position: bottom center;
   -webkit-user-drag: none;
 }
 
@@ -776,6 +781,124 @@ body {
   cursor: default;
 }
 
+.composer-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 12px;
+  padding: 3px;
+  border-radius: var(--cdp-radius);
+  background: var(--cdp-surface);
+  border: 1px solid var(--cdp-border);
+}
+
+.composer-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--cdp-text-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: calc(var(--cdp-radius) - 3px);
+  cursor: pointer;
+  transition: background var(--cdp-anim), color var(--cdp-anim);
+}
+
+.composer-tab:hover {
+  color: var(--cdp-text);
+}
+
+.composer-tab.is-selected {
+  background: var(--cdp-accent-soft);
+  color: var(--cdp-accent-text);
+}
+
+.upcoming-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 6px 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.upcoming-empty {
+  text-align: center;
+  padding: 26px 12px;
+  font-size: 12.5px;
+  color: var(--cdp-text-faint);
+}
+
+.upcoming-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px 8px 8px;
+  border-radius: var(--cdp-radius);
+  transition: background var(--cdp-anim);
+}
+
+.upcoming-row:hover {
+  background: var(--cdp-surface-hover);
+}
+
+.upcoming-row.is-fired .upcoming-text {
+  color: var(--cdp-text-dim);
+  text-decoration: line-through;
+  text-decoration-color: var(--cdp-text-faint);
+}
+
+.upcoming-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.upcoming-text {
+  font-size: 12.5px;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+
+.upcoming-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--cdp-text-faint);
+}
+
+.upcoming-fired {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--cdp-accent-soft);
+  color: var(--cdp-accent-text);
+  font-weight: 600;
+}
+
+.upcoming-delete {
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+}
+
+.upcoming-row:hover .upcoming-delete,
+.upcoming-delete:focus-visible {
+  opacity: 1;
+}
+
+.upcoming-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.upcoming-list::-webkit-scrollbar-thumb {
+  background: var(--cdp-border);
+  border-radius: 4px;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
 .composer-text {
   margin: 0 12px;
   resize: none;
@@ -1058,8 +1181,13 @@ body {
   color: var(--cdp-accent-text);
 }
 
+/* Success celebrates in the user's accent, not a hardcoded green. */
 .toast-success .toast-icon {
-  color: #10b981;
+  color: var(--cdp-accent);
+}
+
+.toast-success {
+  border-color: var(--cdp-accent-glow);
 }
 
 .toast-error .toast-icon {
@@ -1109,6 +1237,8 @@ body {
   .pet-body,
   .icon-btn,
   .chip,
+  .composer-tab,
+  .upcoming-row,
   .primary-btn,
   .send-btn {
     transition: none !important;

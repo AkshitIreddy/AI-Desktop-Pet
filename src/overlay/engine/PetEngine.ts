@@ -11,13 +11,20 @@
  * drag release (vx decays with damping, soft wall bounces), window platforms
  * with per-tick re-validation and calm shimeji-style side-climb mounting
  * (walk to the window's edge, climb straight up, step onto the corner),
- * hide/teleport/sleep states.
+ * dismounting back down the side (dismountPlatform), hide/teleport/sleep
+ * states.
+ *
+ * v2.1 multi-monitor: the floor is per-monitor (`floorAt(x)` = work-area
+ * bottom of the monitor containing x). Walking crosses boundaries between
+ * near-equal floors, tips into a natural fall onto a much lower neighbor
+ * floor, and treats a raised neighbor floor as a wall (see monitors.ts).
+ * `hopAcross` is the one sanctioned ballistic arc (screen-hop behavior).
  *
  * No rAF of its own — the director drives `tick(now, dt)`. No DOM access; the
  * UI renders from the PetHandle snapshot (frameUrl/transform/x/y/size).
  */
 import { BASE_FRAME_MS, BASE_MOVE_MS, PET_BASE_SIZE } from '../../shared/constants';
-import { spriteFolder } from '../../shared/store';
+import { spriteUrl } from '../../shared/store';
 import type {
   CharacterRecord,
   EdgeSide,
@@ -28,6 +35,17 @@ import type {
   SpriteAction,
 } from '../../shared/types';
 import type { DirectorEvent, OverlayEnv, PetHandle } from './api';
+import {
+  FLOOR_STEP_TOLERANCE,
+  MAX_HOP_STEP_UP,
+  floorAt,
+  leftmostMonitor,
+  monitorAt,
+  neighborMonitor,
+  primaryMonitor,
+  rightmostMonitor,
+  walkableRange,
+} from './monitors';
 
 export const GRAVITY = 0.1;
 export const DAMPING = 0.98;
@@ -52,9 +70,9 @@ export interface PetHooks {
 }
 
 interface Task {
-  kind: 'walk' | 'climb' | 'mount' | 'action';
+  kind: 'walk' | 'climb' | 'mount' | 'dismount' | 'hop' | 'action';
   resolve(ok: boolean): void;
-  /** mount only */
+  /** mount/dismount only */
   platform?: Platform;
   side?: 'left' | 'right';
   phase?: 'walk' | 'climb';
@@ -80,11 +98,13 @@ export function v1WalkDistance(width: number): number {
 /** Windows whose bottom edge hangs within this of the floor can be climbed. */
 export const REACH_GAP = 140;
 
-/** True when a window platform is mountable by a calm floor-side climb. */
-export function climbEligible(p: Platform, envHeight: number): boolean {
-  return (
-    p.kind === 'window' && p.bottom !== undefined && envHeight - p.bottom <= REACH_GAP
-  );
+/**
+ * True when a window platform is mountable by a calm floor-side climb.
+ * Reach is measured against the floor of the monitor the window sits on.
+ */
+export function climbEligible(p: Platform, env: OverlayEnv): boolean {
+  if (p.kind !== 'window' || p.bottom === undefined) return false;
+  return floorAt(env, (p.left + p.right) / 2) - p.bottom <= REACH_GAP;
 }
 
 /**
@@ -122,7 +142,6 @@ export class Pet implements PetHandle {
   private frames: { walk: string[]; climb: string[]; fall: string[]; drag: string[] };
   private idleActions: Record<string, SpriteAction>;
   private specialActions: Record<string, SpriteAction>;
-  private folder: string;
   private sleepFrame: string;
 
   private frameMs = BASE_FRAME_MS;
@@ -164,7 +183,6 @@ export class Pet implements PetHandle {
     this.rec = rec;
     this.env = env;
     this.hooks = hooks;
-    this.folder = spriteFolder(rec);
     const a = rec.animation;
     const seq = (prefix: string, n: number): string[] =>
       Array.from({ length: Math.max(1, n) }, (_, i) => this.frameUrlFor(`${prefix}${i + 1}`));
@@ -185,9 +203,11 @@ export class Pet implements PetHandle {
       : this.frames.walk[0];
     this.frameUrlStr = this.frames.fall[0] ?? this.frames.walk[0];
     this.applySettings();
-    // Spawn like v1: drop in from the top at a random x.
-    this.pos.x = Math.random() * Math.max(0, env.width - this.size);
-    this.pos.y = 0;
+    // Spawn like v1: drop in from the top at a random x — on the PRIMARY
+    // monitor, so pets never materialize on a side screen unasked.
+    const pm = primaryMonitor(env);
+    this.pos.x = pm.left + Math.random() * Math.max(0, pm.right - pm.left - this.size);
+    this.pos.y = pm.top;
     this.startFalling(0, 0);
   }
 
@@ -286,15 +306,19 @@ export class Pet implements PetHandle {
       this.climbMidChecked = false;
       this.frameIdx = 0;
       if (side === 'top') {
-        this.pos.y = 0;
-        this.climbTarget = clamp(toY, 0, this.env.width - this.size);
+        // The climbable top edge is the CONTAINING monitor's top bar.
+        const m = monitorAt(this.env, this.centerX());
+        this.pos.y = m.top;
+        this.climbTarget = clamp(toY, m.left, m.right - this.size);
         this.climbDirSign = this.climbTarget < this.pos.x ? -1 : 1;
         this.setState('climbing-top');
       } else {
-        this.pos.x = side === 'left' ? 0 : this.env.width - this.size;
-        this.climbTarget = clamp(toY, 0, this.floorY());
+        // Side walls exist only on the OUTER edges of the virtual union.
+        const m = side === 'left' ? leftmostMonitor(this.env) : rightmostMonitor(this.env);
+        this.pos.x = side === 'left' ? m.left : m.right - this.size;
+        this.climbTarget = clamp(toY, m.top, m.floorY - this.size);
         this.climbDirSign = this.climbTarget < this.pos.y ? -1 : 1;
-        const mid = this.env.height / 2;
+        const mid = (m.top + m.floorY) / 2;
         if (
           (this.climbDirSign > 0 && this.pos.y >= mid) ||
           (this.climbDirSign < 0 && this.pos.y <= mid)
@@ -315,7 +339,7 @@ export class Pet implements PetHandle {
    */
   climbToPlatform(p: Platform, side?: 'left' | 'right'): Promise<boolean> {
     if (!this.canAct() || this.isClimbing()) return Promise.resolve(false);
-    if (!climbEligible(p, this.env.height)) return Promise.resolve(false);
+    if (!climbEligible(p, this.env)) return Promise.resolve(false);
     const chosen = side ?? pickMountSide(p, this.pos.x, this.size, this.env.width);
     if (!chosen) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
@@ -335,6 +359,85 @@ export class Pet implements PetHandle {
     return this.climbToPlatform(p);
   }
 
+  /**
+   * Reverse a window mount: walk along the window top to the near corner,
+   * swing onto the side border, climb down to the floor and step off.
+   * Resolves false when not standing on a window (or it vanished mid-climb).
+   */
+  dismountPlatform(): Promise<boolean> {
+    if (!this.canAct() || this.isClimbing() || this.stateName === 'falling') {
+      return Promise.resolve(false);
+    }
+    const p = this.platformRef;
+    if (!p || p.kind !== 'window') return Promise.resolve(false);
+    const live = this.livePlatform(p) ?? p;
+    const side = pickMountSide(live, this.pos.x, this.size, this.env.width);
+    if (!side) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      this.cancelTask();
+      this.task = { kind: 'dismount', resolve, platform: live, side, phase: 'walk' };
+      // Same corner x the mount finishes on — the reverse pivot point.
+      const cornerX =
+        side === 'left' ? live.left + 2 - this.size / 2 : live.right - 2 - this.size / 2;
+      this.walkTarget = this.clampWalkX(cornerX);
+      this.setState('walking');
+      this.faceToward(this.walkTarget);
+    });
+  }
+
+  /**
+   * screen-hop: ONE gentle low arc across the boundary onto the horizontally
+   * adjacent monitor's floor (rise ≤ 60 px, forward ≤ 120 px) — the single
+   * sanctioned exception to the no-ballistic-hops rule. The arc reuses the
+   * fall physics (gravity/damping), so the landing is the usual soft landing.
+   */
+  hopAcross(dir: 1 | -1): Promise<boolean> {
+    if (!this.canAct() || this.isClimbing() || this.stateName === 'falling') {
+      return Promise.resolve(false);
+    }
+    if (this.platformRef?.kind !== 'floor') return Promise.resolve(false);
+    const m = monitorAt(this.env, this.centerX());
+    const n = neighborMonitor(this.env, m, dir);
+    if (!n) return Promise.resolve(false);
+    const stepUp = m.floorY - n.floorY; // > 0 when the neighbor floor is higher
+    if (stepUp > MAX_HOP_STEP_UP) return Promise.resolve(false);
+    const boundaryX = dir > 0 ? m.right : m.left;
+    // Land with the sprite center a little past the boundary. The margin
+    // shrinks for big pets so the total forward stays inside the 120 px cap.
+    const margin = Math.min(24, Math.max(8, 120 - this.size / 2));
+    const targetCenter = boundaryX + dir * margin;
+    const forward = (targetCenter - this.centerX()) * dir;
+    if (forward <= 0 || forward > 120) return Promise.resolve(false);
+    // Low arc: just enough rise to clear a small ledge, capped at 60 px.
+    const rise = Math.min(60, Math.max(26, stepUp + 22));
+    const v0 = Math.sqrt(2 * GRAVITY * rise);
+    // Simulate the vertical flight (same gravity/damping as stepFalling) to
+    // size vx so the arc covers `forward` by landing time.
+    const drop = n.floorY - m.floorY; // negative when hopping up a ledge
+    let vy = -v0;
+    let yRel = 0;
+    let steps = 0;
+    let horiz = 0; // Σ damping^i — horizontal distance per unit vx
+    let d = 1;
+    while (steps < 600) {
+      vy += GRAVITY;
+      vy *= DAMPING;
+      yRel += vy;
+      horiz += d;
+      d *= DAMPING;
+      steps++;
+      if (vy > 0 && yRel >= drop) break;
+    }
+    const vx = dir * Math.min(3, forward / Math.max(1, horiz));
+    return new Promise<boolean>((resolve) => {
+      this.cancelTask();
+      this.task = { kind: 'hop', resolve };
+      this.facingDir = dir > 0 ? 'right' : 'left';
+      this.platformRef = null;
+      this.startFalling(vx, -v0);
+    });
+  }
+
   playIdle(): Promise<void> {
     return this.playAction(this.idleActions, 'id', 'idle-action', undefined);
   }
@@ -351,8 +454,8 @@ export class Pet implements PetHandle {
     if (this.hiddenFlag || this.stateName === 'dragging') return;
     this.cancelTask();
     this.pendingLandWalk = null;
-    const floorY = this.floorY();
     this.pos.x = clamp(x, 0, this.env.width - this.size);
+    const floorY = this.floorY(); // floor of the monitor at the NEW x
     this.pos.y = Math.min(y, floorY);
     if (this.pos.y >= floorY - 0.5) {
       this.pos.y = floorY;
@@ -620,7 +723,12 @@ export class Pet implements PetHandle {
     this.facingDir = dir > 0 ? 'right' : 'left';
     const before = this.pos.x;
     this.pos.x = this.clampWalkX(this.pos.x + dir);
-    if (this.pos.x === before) this.arriveWalk(); // pinned against an edge
+    if (this.pos.x === before) {
+      // Pinned against a wall (screen edge or a raised neighbor floor) —
+      // turn around so the pet doesn't stand nose-to-wall.
+      this.facingDir = dir > 0 ? 'left' : 'right';
+      this.arriveWalk();
+    }
   }
 
   private arriveWalk(): void {
@@ -632,6 +740,8 @@ export class Pet implements PetHandle {
       t.resolve(true);
     } else if (t?.kind === 'mount' && t.phase === 'walk') {
       this.beginMountClimb(t);
+    } else if (t?.kind === 'dismount' && t.phase === 'walk') {
+      this.beginDismountClimb(t);
     } else {
       this.stand();
     }
@@ -640,7 +750,7 @@ export class Pet implements PetHandle {
   /** The pet reached the window's side — start the slow vertical climb. */
   private beginMountClimb(t: Task): void {
     const live = this.livePlatform(t.platform);
-    if (!live || !climbEligible(live, this.env.height) || t.side === undefined) {
+    if (!live || !climbEligible(live, this.env) || t.side === undefined) {
       this.task = null;
       this.stand();
       t.resolve(false);
@@ -693,6 +803,30 @@ export class Pet implements PetHandle {
     t.resolve(true);
   }
 
+  /** The pet reached the top corner — swing onto the side border, head down. */
+  private beginDismountClimb(t: Task): void {
+    const live = this.livePlatform(t.platform);
+    if (!live || t.side === undefined) {
+      // The window vanished while we walked to the corner — just drop off.
+      this.task = null;
+      this.platformRef = null;
+      this.startFalling(0, 0);
+      t.resolve(false);
+      return;
+    }
+    t.phase = 'climb';
+    t.platform = live;
+    this.platformRef = null;
+    this.frameIdx = 0;
+    // Reverse of completeMount: pivot from the corner onto the side column.
+    this.pos.x = t.side === 'left' ? live.left - this.size : live.right;
+    this.pos.y = live.y - this.size;
+    this.climbDirSign = 1;
+    this.climbTarget = floorAt(this.env, this.pos.x + this.size / 2) - this.size;
+    this.climbMidChecked = true; // deliberate dismounts never coin-flip bail
+    this.setState(t.side === 'left' ? 'climbing-right' : 'climbing-left');
+  }
+
   private livePlatform(p?: Platform): Platform | null {
     if (!p) return null;
     if (p.windowId === undefined) return p;
@@ -700,12 +834,14 @@ export class Pet implements PetHandle {
   }
 
   /**
-   * Mount climbs track a live window: small drift is followed, but a jerk
-   * (>4 px) or the window vanishing lets the pet drop off gently.
+   * Mount/dismount climbs track a live window: small drift is followed, but
+   * a jerk (>4 px) or the window vanishing lets the pet drop off gently.
    */
-  private validateMountClimb(): boolean {
+  private validateSideClimb(): boolean {
     const t = this.task;
-    if (!(t?.kind === 'mount' && t.phase === 'climb')) return true;
+    if (!((t?.kind === 'mount' || t?.kind === 'dismount') && t.phase === 'climb')) {
+      return true;
+    }
     const live = this.livePlatform(t.platform);
     if (live && t.side !== undefined && t.platform !== undefined) {
       const standX = t.side === 'left' ? live.left - this.size : live.right;
@@ -713,7 +849,8 @@ export class Pet implements PetHandle {
         Math.abs(standX - this.pos.x) > 4 || Math.abs(live.y - t.platform.y) > 4;
       if (!jerked) {
         t.platform = live;
-        this.climbTarget = live.y - this.size;
+        // Mounts chase the window's top; dismounts already target the floor.
+        if (t.kind === 'mount') this.climbTarget = live.y - this.size;
         return true;
       }
     }
@@ -725,10 +862,11 @@ export class Pet implements PetHandle {
   }
 
   private stepClimb(): void {
-    if (!this.validateMountClimb()) return;
+    if (!this.validateSideClimb()) return;
     if (this.stateName === 'climbing-top') {
       this.pos.x += this.climbDirSign;
-      const mid = this.env.width / 2;
+      const topM = monitorAt(this.env, this.centerX());
+      const mid = (topM.left + topM.right) / 2;
       if (
         !this.climbMidChecked &&
         ((this.climbDirSign < 0 && this.pos.x <= mid) ||
@@ -752,7 +890,8 @@ export class Pet implements PetHandle {
     }
 
     this.pos.y += this.climbDirSign;
-    const mid = this.env.height / 2;
+    const sideM = monitorAt(this.env, this.centerX());
+    const mid = (sideM.top + sideM.floorY) / 2;
     if (
       !this.climbMidChecked &&
       ((this.climbDirSign < 0 && this.pos.y <= mid) ||
@@ -778,6 +917,12 @@ export class Pet implements PetHandle {
         this.task = null;
         this.platformRef = this.floorPlatform();
         this.stand();
+        if (t?.kind === 'dismount' && t.side !== undefined) {
+          // Step off: a short stroll away from the window's side.
+          const dir = t.side === 'left' ? -1 : 1;
+          this.walkTarget = this.clampWalkX(this.pos.x + dir * (30 + Math.random() * 40));
+          this.faceToward(this.walkTarget ?? this.pos.x);
+        }
         t?.resolve(true);
       } else {
         this.finishClimb();
@@ -857,10 +1002,11 @@ export class Pet implements PetHandle {
     }
   }
 
-  /** Where this fall will end: the highest platform under the pet, or floor. */
+  /** Where this fall will end: the highest platform under the pet, or the
+   *  floor of the monitor currently under the pet (multi-monitor drops). */
   private resolveLanding(): { y: number; platform: Platform } {
     const floor = this.floorPlatform();
-    const floorY = this.env.height - this.size;
+    const floorY = floor.y - this.size;
     if (this.vel.y <= 0) return { y: floorY, platform: floor }; // still rising
     const centerX = this.pos.x + this.size / 2;
     let bestY = floorY;
@@ -891,10 +1037,15 @@ export class Pet implements PetHandle {
     this.frameIdx = 0;
     this.setState('walking');
     const t = this.task;
-    if (t?.kind === 'mount' && t.phase === 'walk') {
+    if (t?.kind === 'hop') {
+      // screen-hop arc finished on the neighbor floor.
+      this.task = null;
+      this.walkTarget = null;
+      t.resolve(true);
+    } else if (t?.kind === 'mount' && t.phase === 'walk') {
       // A mount ordered mid-air resumes its approach walk now that we're down.
       const live = this.livePlatform(t.platform);
-      if (!live || !climbEligible(live, this.env.height) || t.side === undefined) {
+      if (!live || !climbEligible(live, this.env) || t.side === undefined) {
         this.task = null;
         this.walkTarget = null;
         t.resolve(false);
@@ -908,10 +1059,12 @@ export class Pet implements PetHandle {
       this.walkTarget = this.clampWalkX(this.walkTarget);
       this.faceToward(this.walkTarget);
     } else if (this.pendingLandWalk !== null) {
-      // v1: after a climb bail, wander a randomized distance inward.
+      // v1: after a climb bail, wander a randomized distance inward —
+      // sized by the monitor we landed on, not the whole virtual union.
       const dir = this.pendingLandWalk;
       this.pendingLandWalk = null;
-      this.walkTarget = this.clampWalkX(this.pos.x + dir * v1WalkDistance(this.env.width));
+      const m = monitorAt(this.env, this.centerX());
+      this.walkTarget = this.clampWalkX(this.pos.x + dir * v1WalkDistance(m.right - m.left));
       this.faceToward(this.walkTarget);
     } else {
       this.walkTarget = null;
@@ -925,7 +1078,18 @@ export class Pet implements PetHandle {
     if (!p) return;
     if (this.stateName === 'falling' || this.stateName === 'dragging') return;
     if (p.kind === 'floor') {
-      this.pos.y = this.env.height - this.size;
+      const m = monitorAt(this.env, this.centerX());
+      if (m.floorY - p.y > FLOOR_STEP_TOLERANCE) {
+        // Walked past the boundary onto a monitor whose floor is much lower —
+        // tip into a natural fall. Walk/mount tasks survive (startFalling
+        // keeps them) and resume on the new floor after landing.
+        this.platformRef = null;
+        this.startFalling(this.facingDir === 'right' ? 0.5 : -0.5, 0);
+        return;
+      }
+      // Same monitor, or a small step between near-equal floors: follow it.
+      if (m.floorY !== p.y) this.platformRef = this.floorPlatformAt(this.centerX());
+      this.pos.y = m.floorY - this.size;
       return;
     }
     const live = this.env.platforms.find((q) => q.windowId === p.windowId);
@@ -1015,7 +1179,7 @@ export class Pet implements PetHandle {
   private reappear(): void {
     this.hiddenFlag = false;
     this.pos.x = clamp(this.pos.x, 0, this.env.width - this.size);
-    this.pos.y = 0;
+    this.pos.y = monitorAt(this.env, this.centerX()).top;
     this.platformRef = null;
     this.startFalling(0, 0);
     this.hooks.emit({ type: 'returned', pet: this.rec.name });
@@ -1061,7 +1225,15 @@ export class Pet implements PetHandle {
     if (p && p.kind === 'window') {
       return clamp(x, p.left + 2 - this.size / 2, p.right - 2 - this.size / 2);
     }
-    return clamp(x, 0, Math.max(0, this.env.width - this.size));
+    // Floor walking: bounded by the union's outer edges plus any raised
+    // neighbor floors (walls). Much-lower neighbor floors stay passable —
+    // crossing them tips into a natural fall (revalidatePlatform).
+    const range = walkableRange(this.env, this.centerX(), this.size);
+    return clamp(
+      x,
+      Math.max(0, range.min),
+      Math.min(range.max, this.env.width - this.size),
+    );
   }
 
   private faceToward(targetX: number): void {
@@ -1069,16 +1241,26 @@ export class Pet implements PetHandle {
     this.facingDir = targetX < this.pos.x ? 'left' : 'right';
   }
 
+  private centerX(): number {
+    return this.pos.x + this.size / 2;
+  }
+
+  /** Sprite-top y when standing on the floor under the pet's current x. */
   private floorY(): number {
-    return this.env.height - this.size;
+    return floorAt(this.env, this.centerX()) - this.size;
+  }
+
+  private floorPlatformAt(x: number): Platform {
+    const m = monitorAt(this.env, x);
+    return { kind: 'floor', y: m.floorY, left: m.left, right: m.right };
   }
 
   private floorPlatform(): Platform {
-    return { kind: 'floor', y: this.env.height, left: 0, right: this.env.width };
+    return this.floorPlatformAt(this.centerX());
   }
 
   private frameUrlFor(frame: string): string {
-    return `/assets/${this.folder}/${frame}.png`;
+    return spriteUrl(this.rec, `${frame}.png`);
   }
 
   /** v1 sprite-facing convention: sprites face LEFT natively. */

@@ -29,6 +29,7 @@ export function PetLayer() {
     if (e.button !== 0) return;
     const pet = runtime.director.pets.get(name);
     if (!pet) return;
+    runtime.setActivePet(name);
     tracks.set(name, {
       pointerId: e.pointerId,
       startX: e.clientX,
@@ -142,11 +143,7 @@ export function PetLayer() {
           onPointerCancel={(e) => onCancel(p.name, e)}
         >
           <div className="pet-body">
-            <img
-              src={`/assets/${p.folder}/walk1.png`}
-              alt={p.displayName}
-              draggable={false}
-            />
+            <img src={p.frameSrc} alt={p.displayName} draggable={false} />
           </div>
         </div>
       ))}

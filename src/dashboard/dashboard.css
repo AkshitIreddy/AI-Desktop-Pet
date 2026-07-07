@@ -291,6 +291,13 @@ p {
   flex: none;
 }
 
+/* Icon wrapper — receives the press pulse so the row itself never moves. */
+.cdp-nav-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
 .cdp-sidebar-foot {
   padding: 10px 12px 2px;
   color: var(--cdp-text-faint);
@@ -1676,8 +1683,9 @@ p {
   border-left-color: var(--cdp-danger);
 }
 
+/* Success rides the accent (not green) so toasts feel like part of the theme. */
 .cdp-toast[data-kind='success'] {
-  border-left-color: var(--cdp-ok);
+  border-left-color: var(--cdp-accent);
 }
 
 /* ================================ Onboarding ============================== */
@@ -2101,4 +2109,329 @@ p {
   border: 3px solid var(--cdp-surface-hover);
   border-top-color: var(--cdp-accent);
   animation: cdp-spin 0.8s linear infinite;
+}
+
+/* ============================= Settings search ============================ */
+
+.cdp-settings-search {
+  max-width: 420px;
+  margin-bottom: 22px;
+}
+
+/* Row labels that match the search query. */
+.cdp-row-label[data-hit] {
+  background: var(--cdp-accent-soft);
+  color: var(--cdp-accent-text);
+  border-radius: 5px;
+  padding: 1px 5px;
+  margin: -1px -5px;
+}
+
+/* Explicit "this field is editable NOW" ring for the API key input. */
+.cdp-input[data-editing] {
+  border-color: var(--cdp-accent);
+  box-shadow: 0 0 0 3px var(--cdp-accent-soft);
+  background: var(--cdp-bg-elevated);
+  animation: cdp-edit-ring var(--cdp-anim-slow, 0.45s) ease;
+}
+
+@keyframes cdp-edit-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--cdp-accent-glow);
+  }
+  100% {
+    box-shadow: 0 0 0 3px var(--cdp-accent-soft);
+  }
+}
+
+/* =============================== Hotkey field ============================= */
+
+.cdp-hotkey-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.cdp-hotkey-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cdp-hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 168px;
+  min-height: 34px;
+  padding: 5px 12px;
+  border-radius: var(--cdp-radius-sm);
+  background: var(--cdp-surface);
+  border: 1px solid var(--cdp-border);
+  font-size: 12.5px;
+  transition: border-color var(--cdp-anim), background var(--cdp-anim), box-shadow var(--cdp-anim);
+}
+
+.cdp-hotkey:hover {
+  background: var(--cdp-surface-hover);
+}
+
+.cdp-hotkey[data-recording] {
+  border-color: var(--cdp-accent);
+  box-shadow: 0 0 0 3px var(--cdp-accent-soft);
+  background: var(--cdp-bg-elevated);
+}
+
+.cdp-hotkey-listen {
+  color: var(--cdp-accent-text);
+  font-weight: 600;
+  animation: cdp-listen-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cdp-listen-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.cdp-hotkey-empty {
+  color: var(--cdp-text-faint);
+}
+
+.cdp-hotkey-key {
+  padding: 1px 8px 2px;
+  border: 1px solid var(--cdp-border);
+  border-bottom-width: 2.5px;
+  border-radius: 6px;
+  background: var(--cdp-bg-elevated);
+  color: var(--cdp-text);
+  font-family: var(--cdp-font);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.cdp-hotkey-clear {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--cdp-text-faint);
+  background: var(--cdp-surface-hover);
+}
+
+.cdp-hotkey-clear:hover {
+  color: var(--cdp-text);
+}
+
+/* ============================ Skill param popover ========================= */
+
+.cdp-params {
+  position: relative;
+  display: inline-flex;
+}
+
+.cdp-gear {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--cdp-text-faint);
+  background: var(--cdp-surface);
+  border: 1px solid var(--cdp-border);
+  transition: color var(--cdp-anim), background var(--cdp-anim), border-color var(--cdp-anim);
+}
+
+.cdp-gear:hover {
+  color: var(--cdp-text);
+  background: var(--cdp-surface-hover);
+}
+
+.cdp-gear[data-open] {
+  color: var(--cdp-accent-text);
+  background: var(--cdp-accent-soft);
+  border-color: var(--cdp-accent);
+}
+
+.cdp-params-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  z-index: 30;
+  width: 264px;
+  padding: 12px 14px;
+  border-radius: var(--cdp-radius);
+  background: var(--cdp-bg-elevated);
+  border: 1px solid var(--cdp-border);
+  box-shadow: var(--cdp-shadow);
+}
+
+.cdp-params-pop[data-align='right'] {
+  right: 0;
+}
+
+.cdp-params-pop[data-align='left'] {
+  left: 0;
+}
+
+.cdp-params-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cdp-params-head strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.cdp-params-head span {
+  font-size: 11.5px;
+  color: var(--cdp-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cdp-params-row {
+  padding: 6px 0;
+}
+
+.cdp-params-row + .cdp-params-row {
+  border-top: 1px solid var(--cdp-border);
+}
+
+.cdp-params-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  margin-bottom: 5px;
+}
+
+.cdp-params-row .cdp-slider {
+  width: 100%;
+}
+
+.cdp-params-foot {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--cdp-text-faint);
+}
+
+/* Gear pinned in the corner of a skill card. */
+.cdp-skill-card {
+  position: relative;
+}
+
+.cdp-skill-card-gear {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+/* Param rows under the loadout grid in the character editor. */
+.cdp-loadout-param-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+}
+
+.cdp-loadout-param-row .icon {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--cdp-accent-text);
+  background: var(--cdp-accent-soft);
+}
+
+.cdp-loadout-param-row .label {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--cdp-text-dim);
+}
+
+/* ============================ Custom sprite import ======================== */
+
+.cdp-import-card {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  text-align: left;
+  padding: 13px 15px;
+  margin-bottom: 12px;
+  border-radius: var(--cdp-radius);
+  border: 1.5px dashed var(--cdp-border);
+  color: var(--cdp-text-dim);
+  transition: border-color var(--cdp-anim), background var(--cdp-anim), color var(--cdp-anim);
+}
+
+.cdp-import-card:hover:not(:disabled) {
+  border-color: var(--cdp-accent);
+  background: var(--cdp-accent-soft);
+  color: var(--cdp-text);
+}
+
+.cdp-import-card:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.cdp-import-card[data-on] {
+  border-style: solid;
+  border-color: var(--cdp-accent);
+  background: var(--cdp-accent-soft);
+}
+
+.cdp-import-icon {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--cdp-accent-text);
+  background: var(--cdp-surface);
+  border: 1px solid var(--cdp-border);
+}
+
+.cdp-import-preview {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.cdp-import-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cdp-import-meta strong {
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--cdp-text);
+}
+
+.cdp-import-meta > span {
+  font-size: 11.5px;
+  color: var(--cdp-text-faint);
+  line-height: 1.5;
 }

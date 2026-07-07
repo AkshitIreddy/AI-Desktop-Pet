@@ -1,15 +1,21 @@
 /**
- * ReminderComposer — small glass dialog near the pet: what + when. Saving goes
- * through the Convai layer's reminders engine so the character acknowledges it.
+ * ReminderComposer — small glass dialog near the pet with two tabs:
+ * "New" (what + when; saving goes through the Convai layer's reminders engine
+ * so the character acknowledges it) and "Upcoming" (every stored reminder,
+ * soonest first, with delete).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { sounds } from '../../shared/sounds';
+import { appStore } from '../../shared/store';
+import type { Reminder } from '../../shared/types';
 import { messageOf } from '../../skills/handlers';
 import { hitRegionRegistry } from '../engine/hitRegions';
 import { clamp, displayNameOf, overlayUi, runtime, useOverlayStore } from '../runtime';
 
 const W = 320;
+
+type ComposerTab = 'new' | 'upcoming';
 
 function toLocalInput(d: Date): string {
   const p = (n: number) => n.toString().padStart(2, '0');
@@ -52,13 +58,21 @@ function formatWhen(dueAt: number): string {
   return `on ${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} at ${time}`;
 }
 
+function sortedReminders(list: Reminder[]): Reminder[] {
+  return [...list].sort((a, b) => a.dueAt - b.dueAt);
+}
+
 export function ReminderComposer({ petName }: { petName: string }) {
   const reduce = useOverlayStore((s) => s.settings.reduceMotion);
+  const [tab, setTab] = useState<ComposerTab>('new');
   const [text, setText] = useState('');
   const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 30 * 60_000)));
   const [chip, setChip] = useState<number | null>(0);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
+  const [reminders, setReminders] = useState<Reminder[]>(() =>
+    sortedReminders(appStore.state.reminders),
+  );
   const ref = useRef<HTMLDivElement>(null);
   const chips = useMemo(chipTimes, []);
 
@@ -72,15 +86,17 @@ export function ReminderComposer({ petName }: { petName: string }) {
     return { x: clamp(x, 8, env.width - W - 8), y: clamp(b.y - 60, 8, env.height - 300) };
   }, [petName]);
 
-  // Focus lease + Escape to close.
+  // Focus lease + Escape to close + live reminder list.
   useEffect(() => {
     const release = runtime.acquireFocus();
+    const unsub = appStore.subscribe((st) => setReminders(sortedReminders(st.reminders)));
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') overlayUi.closeReminderComposer();
     };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
+      unsub();
       release();
     };
   }, []);
@@ -93,6 +109,21 @@ export function ReminderComposer({ petName }: { petName: string }) {
     if (el) hitRegionRegistry.set('composer', { x: pos.x, y: pos.y, w: W, h: el.offsetHeight });
   });
   useEffect(() => () => hitRegionRegistry.set('composer', null), []);
+
+  const switchTab = (next: ComposerTab) => {
+    if (next === tab) return;
+    sounds.play('select');
+    setTab(next);
+    setErr('');
+  };
+
+  const remove = (id: string) => {
+    sounds.play('select');
+    runtime.layer.reminders.cancel(id).catch((e) => {
+      overlayUi.toast(messageOf(e), 'error');
+      sounds.play('error');
+    });
+  };
 
   const pickChip = (i: number) => {
     setChip(i);
@@ -136,7 +167,7 @@ export function ReminderComposer({ petName }: { petName: string }) {
       transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 28 }}
     >
       <header className="panel-header">
-        <div className="panel-title">Remind me…</div>
+        <div className="panel-title">Reminders</div>
         <button
           type="button"
           className="icon-btn"
@@ -147,48 +178,102 @@ export function ReminderComposer({ petName }: { petName: string }) {
         </button>
       </header>
 
-      <textarea
-        className="composer-text"
-        rows={2}
-        autoFocus
-        placeholder="What should I remind you about?"
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          if (err) setErr('');
-        }}
-      />
-
-      <div className="composer-chips">
-        {chips.map((c, i) => (
-          <button
-            key={c.label}
-            type="button"
-            className={`chip ${chip === i ? 'is-selected' : ''}`}
-            onClick={() => pickChip(i)}
-          >
-            {c.label}
-          </button>
-        ))}
+      <div className="composer-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'new'}
+          className={`composer-tab ${tab === 'new' ? 'is-selected' : ''}`}
+          onClick={() => switchTab('new')}
+        >
+          New
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'upcoming'}
+          className={`composer-tab ${tab === 'upcoming' ? 'is-selected' : ''}`}
+          onClick={() => switchTab('upcoming')}
+        >
+          Upcoming{reminders.length ? ` (${reminders.length})` : ''}
+        </button>
       </div>
 
-      <input
-        className="composer-when"
-        type="datetime-local"
-        value={when}
-        min={toLocalInput(new Date())}
-        onChange={(e) => {
-          setWhen(e.target.value);
-          setChip(null);
-          setErr('');
-        }}
-      />
+      {tab === 'new' ? (
+        <>
+          <textarea
+            className="composer-text"
+            rows={2}
+            autoFocus
+            placeholder="What should I remind you about?"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              if (err) setErr('');
+            }}
+          />
 
-      {err && <div className="composer-error">{err}</div>}
+          <div className="composer-chips">
+            {chips.map((c, i) => (
+              <button
+                key={c.label}
+                type="button"
+                className={`chip ${chip === i ? 'is-selected' : ''}`}
+                onClick={() => pickChip(i)}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
 
-      <button type="button" className="primary-btn" disabled={saving} onClick={save}>
-        {saving ? 'Saving…' : 'Save reminder'}
-      </button>
+          <input
+            className="composer-when"
+            type="datetime-local"
+            value={when}
+            min={toLocalInput(new Date())}
+            onChange={(e) => {
+              setWhen(e.target.value);
+              setChip(null);
+              setErr('');
+            }}
+          />
+
+          {err && <div className="composer-error">{err}</div>}
+
+          <button type="button" className="primary-btn" disabled={saving} onClick={save}>
+            {saving ? 'Saving…' : 'Save reminder'}
+          </button>
+        </>
+      ) : (
+        <div className="upcoming-list">
+          {reminders.length === 0 && (
+            <div className="upcoming-empty">Nothing scheduled — you're all caught up.</div>
+          )}
+          {reminders.map((r) => (
+            <div key={r.id} className={`upcoming-row ${r.fired ? 'is-fired' : ''}`}>
+              <div className="upcoming-main">
+                <div className="upcoming-text">{r.text}</div>
+                <div className="upcoming-meta">
+                  {displayNameOf(r.characterName)} · due {formatWhen(r.dueAt)}
+                  {r.fired && <span className="upcoming-fired">Delivered</span>}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="icon-btn upcoming-delete"
+                title="Delete reminder"
+                onClick={() => remove(r.id)}
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M4 7h16" />
+                  <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                  <path d="M6.5 7l1 13h9l1-13" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </motion.div>
   );
 }
