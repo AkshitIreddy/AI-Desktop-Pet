@@ -119,13 +119,16 @@ jobs:
             echo "## Changes"
             echo ""
             # One section per commit: subject as heading, body (already
-            # markdown bullets by commit convention) as the detail.
+            # markdown bullets by commit convention) as the detail. Version
+            # bump commits carry no information — skip them.
             if [ -n "$PREV" ]; then
-              git log --no-merges --reverse --pretty=format:'### %s%n%n%b' "${PREV}..${TAG}"
+              git log --no-merges --reverse --invert-grep --grep='^Bump version' \
+                --pretty=format:'### %s%n%n%b' "${PREV}..${TAG}"
               echo ""
               echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
             else
-              git log --no-merges --reverse --pretty=format:'### %s%n%n%b' "${TAG}"
+              git log --no-merges --reverse --invert-grep --grep='^Bump version' \
+                --pretty=format:'### %s%n%n%b' "${TAG}"
             fi
           } > notes.md
           # Drafts are invisible to /releases/tags/:tag — look the id up by tag.
