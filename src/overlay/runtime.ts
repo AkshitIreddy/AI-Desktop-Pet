@@ -372,6 +372,7 @@ class OverlayRuntime {
     sounds.configure(s.soundPack, s.sfxVolume);
     useOverlayStore.setState({ settings: { ...s } });
     void syncHotkeys(s);
+    this.syncCursorStream();
     this.kickAutoConnect();
   }
 
@@ -431,9 +432,16 @@ class OverlayRuntime {
     sounds.play('despawn');
   }
 
-  /** Rust only emits cursor-pos while at least one pet is spawned. */
+  /**
+   * The ~30 Hz cursor-pos stream wakes the webview on every mouse move; only
+   * ask for it while something consumes it — cursor behaviors (chase/watch)
+   * or idle-sleep detection (cursor.lastMovedAt).
+   */
   private syncCursorStream(): void {
-    void ipc.setCursorStream(this.director.pets.size > 0);
+    const s = appStore.state.settings;
+    const wanted =
+      this.director.pets.size > 0 && (s.cursorInteractions || s.idleSleepMinutes > 0);
+    void ipc.setCursorStream(wanted);
   }
 
   /* ------------------------------ director events ------------------------------ */
@@ -519,7 +527,22 @@ class OverlayRuntime {
     // (move steps are 12 ms-gated, so more ticks = more steps) and multiplied
     // compositor work on the fullscreen transparent overlay for no visible
     // gain — sprite frames only advance every 200 ms.
-    if (now - this.lastLoopAt < 15.5) return;
+    //
+    // And when EVERY pet is visually idle (standing/sleeping/hidden), drop to
+    // ~16 fps: nothing on screen changes between ticks, so the loop only
+    // needs enough cadence to notice a behavior starting. The first tick
+    // after motion resumes restores 60 fps within ~62 ms — imperceptible for
+    // the calm, stepped shimeji movement.
+    let idle = true;
+    if (this.director) {
+      for (const pet of this.director.pets.values()) {
+        if (!pet.visuallyIdle) {
+          idle = false;
+          break;
+        }
+      }
+    }
+    if (now - this.lastLoopAt < (idle ? 62 : 15.5)) return;
     this.lastLoopAt = now;
     this.director.tick(now);
 
@@ -531,7 +554,10 @@ class OverlayRuntime {
           if (root.style.display !== 'none') root.style.display = 'none';
         } else {
           if (root.style.display) root.style.display = '';
-          const tf = `translate3d(${pet.x}px, ${pet.y}px, 0)`;
+          // Whole-px positions: subpixel translate makes the compositor
+          // resample the sprite (blurrier AND costlier on integrated GPUs),
+          // and rounding lets tiny sim jitters skip the write entirely.
+          const tf = `translate3d(${Math.round(pet.x)}px, ${Math.round(pet.y)}px, 0)`;
           if (refs.lastTransform !== tf) {
             refs.lastTransform = tf;
             root.style.transform = tf;

@@ -60,8 +60,8 @@ export function VisionBadge({
       el.style.display = '';
       const w = el.offsetWidth || 86;
       const h = el.offsetHeight || 26;
-      const x = clamp(f.x + f.size / 2 - w / 2, 8, env.width - w - 8);
-      const y = Math.max(8, f.y - h - 60);
+      const x = Math.round(clamp(f.x + f.size / 2 - w / 2, 8, env.width - w - 8));
+      const y = Math.round(Math.max(8, f.y - h - 60));
       hitRegionRegistry.set(regionId, { x, y, w, h });
       const t = `translate3d(${x}px, ${y}px, 0)`;
       if (t === lastTransform) return;

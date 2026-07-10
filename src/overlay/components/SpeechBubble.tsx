@@ -58,8 +58,8 @@ export function SpeechBubble({ petName }: { petName: string }) {
       const h = el.offsetHeight;
       if (!w) return;
       const petCx = f.x + f.size / 2;
-      const x = clamp(petCx - w / 2, 8, env.width - w - 8);
-      const y = Math.max(8, f.y - h - 14);
+      const x = Math.round(clamp(petCx - w / 2, 8, env.width - w - 8));
+      const y = Math.round(Math.max(8, f.y - h - 14));
       const t = `translate3d(${x}px, ${y}px, 0)`;
       if (t === lastTransform) return;
       lastTransform = t;

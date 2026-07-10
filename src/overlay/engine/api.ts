@@ -96,6 +96,12 @@ export interface PetHandle {
   /** Currently executing an imperative/behavior step. */
   readonly busy: boolean;
   readonly hidden: boolean;
+  /**
+   * Nothing about this pet changes visibly between ticks (standing still,
+   * sleeping, or hidden) — the runtime drops its loop to a low tick rate
+   * when EVERY pet is visually idle.
+   */
+  readonly visuallyIdle: boolean;
   /** Current sprite frame URL (UI renders this). */
   readonly frameUrl: string;
   /** CSS transform for the sprite (flips/rotations while climbing). */

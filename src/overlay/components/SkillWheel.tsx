@@ -101,8 +101,8 @@ export function SkillWheel({ petName }: { petName: string }) {
       // bottom lies under the taskbar. floorY (work-area bottom) keeps the
       // whole wheel visible above the taskbar.
       const m = monitorAt(env, f.x + f.size / 2);
-      const x = clamp(f.x + f.size / 2 - box / 2, m.left + 8, m.right - box - 8);
-      const y = clamp(f.y + f.size / 2 - box / 2, m.top + 8, m.floorY - box - 8);
+      const x = Math.round(clamp(f.x + f.size / 2 - box / 2, m.left + 8, m.right - box - 8));
+      const y = Math.round(clamp(f.y + f.size / 2 - box / 2, m.top + 8, m.floorY - box - 8));
       hitRegionRegistry.set('wheel', { x, y, w: box, h: box });
       const t = `translate3d(${x}px, ${y}px, 0)`;
       if (t === lastTransform) return;

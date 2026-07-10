@@ -265,6 +265,14 @@ export class Pet implements PetHandle {
     return this.hiddenFlag;
   }
 
+  get visuallyIdle(): boolean {
+    if (this.hiddenFlag) return true;
+    // Sleeping counts as idle: the breath pulse is quantized to 100 ms steps,
+    // which a low tick rate samples just fine.
+    if (this.stateName === 'sleeping') return true;
+    return this.stateName === 'walking' && this.walkTarget === null;
+  }
+
   get frameUrl(): string {
     return this.hiddenFlag ? '' : this.frameUrlStr;
   }

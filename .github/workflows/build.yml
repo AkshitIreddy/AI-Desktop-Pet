@@ -118,15 +118,15 @@ jobs:
           {
             echo "## Changes"
             echo ""
+            # One section per commit: subject as heading, body (already
+            # markdown bullets by commit convention) as the detail.
             if [ -n "$PREV" ]; then
-              git log --no-merges --pretty='- %s' "${PREV}..${TAG}"
+              git log --no-merges --reverse --pretty=format:'### %s%n%n%b' "${PREV}..${TAG}"
               echo ""
               echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
             else
-              git log --no-merges --pretty='- %s' "${TAG}"
+              git log --no-merges --reverse --pretty=format:'### %s%n%n%b' "${TAG}"
             fi
-            echo ""
-            echo "Download the installer for your OS below (Windows: .exe · macOS: .dmg · Linux: .deb / .AppImage)."
           } > notes.md
           # Drafts are invisible to /releases/tags/:tag — look the id up by tag.
           RID=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \

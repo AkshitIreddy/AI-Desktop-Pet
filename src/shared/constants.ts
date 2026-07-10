@@ -62,7 +62,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quietHoursEnd: '',
   visionFps: 1,
   visionSessionMinutes: 10,
-  idleSleepMinutes: 10,
+  idleSleepMinutes: 0,
   autostart: false,
   reduceMotion: false,
   showOnboarding: true,
@@ -73,14 +73,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hotkeys: {},
 };
 
-/** Old defaults that changed in 2.1 — stored values equal to these are bumped. */
+/** Old defaults that changed since 2.1 — stored values equal to these are bumped. */
 export const LEGACY_DEFAULT_BUMPS: Array<{
-  key: 'activityLevel' | 'freeWillFrequency';
+  key: 'activityLevel' | 'freeWillFrequency' | 'idleSleepMinutes';
   from: number;
   to: number;
 }> = [
   { key: 'activityLevel', from: 55, to: 70 },
   { key: 'freeWillFrequency', from: 30, to: 55 },
+  // Naps surprised people ("where did she go?") — off unless opted into.
+  { key: 'idleSleepMinutes', from: 10, to: 0 },
 ];
 
 /** Base timing constants of the v1 shimeji engine (before animationSpeed scaling). */
