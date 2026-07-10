@@ -331,6 +331,12 @@ export interface Platform {
   right: number;
   /** Bottom edge of the source window (logical px) — used to plan side climbs. */
   bottom?: number;
+  /**
+   * Rects (logical px) of visible windows ABOVE this one in z-order. A pet
+   * standing where one of these covers the top edge is standing "inside"
+   * another window — it must drop off (see edgeCovered).
+   */
+  cover?: Array<{ left: number; top: number; right: number; bottom: number }>;
 }
 
 export type Facing = 'left' | 'right';

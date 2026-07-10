@@ -46,6 +46,7 @@ import {
   rightmostMonitor,
   walkableRange,
 } from './monitors';
+import { edgeCovered } from './platforms';
 
 export const GRAVITY = 0.1;
 export const DAMPING = 0.98;
@@ -1103,6 +1104,19 @@ export class Pet implements PetHandle {
       return;
     }
     const centerX = this.pos.x + this.size / 2;
+    // The user focused another window over this one: the edge under the pet
+    // is no longer visible, so it would look like standing in mid-air on top
+    // of the covering window. Drop off instead.
+    if (edgeCovered(live, centerX)) {
+      this.hooks.emit({
+        type: 'platform-lost',
+        pet: this.rec.name,
+        windowTitle: this.hooks.windowTitle(p.windowId ?? -1),
+        covered: true,
+      });
+      this.startle();
+      return;
+    }
     const movedY = Math.abs(live.y - p.y);
     const slidOff = centerX < live.left - 2 || centerX > live.right + 2;
     if (movedY > 4 || slidOff) {

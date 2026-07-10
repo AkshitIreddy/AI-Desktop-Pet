@@ -73,7 +73,13 @@ export type DirectorEvent =
   | { type: 'woke'; pet: string }
   | { type: 'hidden'; pet: string }
   | { type: 'returned'; pet: string }
-  | { type: 'platform-lost'; pet: string; windowTitle: string };
+  | {
+      type: 'platform-lost';
+      pet: string;
+      windowTitle: string;
+      /** True when the window got covered by another (vs moved away/closed). */
+      covered?: boolean;
+    };
 
 export interface PetHandle {
   readonly rec: CharacterRecord;

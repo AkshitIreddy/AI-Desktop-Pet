@@ -64,6 +64,19 @@ export function windowTitle(id: number): string {
   return titles.get(id) ?? 'a window';
 }
 
+/** True when the platform's top edge at x is hidden behind a window above it. */
+export function edgeCovered(p: Platform, x: number): boolean {
+  return !!p.cover?.some(
+    (r) => x >= r.left && x <= r.right && p.y >= r.top && p.y <= r.bottom,
+  );
+}
+
+/** True when some stretch of the edge is still visible (worth climbing to). */
+export function edgePartlyVisible(p: Platform): boolean {
+  const xs = [p.left + 8, (p.left + p.right) / 2, p.right - 8];
+  return xs.some((x) => !edgeCovered(p, x));
+}
+
 async function poll(opts: StartOpts): Promise<void> {
   if (inFlight) return;
   if (!opts.shouldPoll()) {
@@ -81,13 +94,27 @@ async function poll(opts: StartOpts): Promise<void> {
     const env = opts.env;
     const next: Platform[] = [];
     const ids = new Set<number>();
+    // Windows earlier in the (top-first z-order) list cover later ones. Every
+    // visible window occludes — including fullscreen/maximized ones that are
+    // rejected as platforms below.
+    const above: NonNullable<Platform['cover']> = [];
     for (const win of wins) {
       if (next.length >= MAX_PLATFORMS) break;
       const p = toPlatform(win, env);
-      if (!p) continue;
-      next.push(p);
-      ids.add(win.id);
-      titles.set(win.id, win.title || win.app);
+      if (p) {
+        p.cover = above.slice();
+        next.push(p);
+        ids.add(win.id);
+        titles.set(win.id, win.title || win.app);
+      }
+      if (!win.minimized) {
+        above.push({
+          left: (win.rect.x - env.originX) / env.scale,
+          top: (win.rect.y - env.originY) / env.scale,
+          right: (win.rect.x + win.rect.w - env.originX) / env.scale,
+          bottom: (win.rect.y + win.rect.h - env.originY) / env.scale,
+        });
+      }
     }
     const fresh = baselineNeeded
       ? []

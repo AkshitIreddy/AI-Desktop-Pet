@@ -86,16 +86,52 @@ jobs:
           # __VERSION__ is replaced by tauri-action with the app version from
           # tauri.conf.json — all four matrix jobs upload into this ONE release.
           # The release is created as a DRAFT so it stays invisible while the
-          # platform installers stream in; when every job is green, open
-          # Releases → the vX.Y.Z draft → Publish. Watchers then get a single
-          # complete announcement with all platforms attached.
+          # platform installers stream in; when every job is green the
+          # release-notes job below fills in the real changes, then open
+          # Releases → the vX.Y.Z draft → Publish.
           tagName: v__VERSION__
           releaseName: 'Convai Desktop Pets v__VERSION__'
-          releaseBody: >
-            AI-powered desktop companions built with Tauri and Convai.
-            See the [README](https://github.com/AkshitIreddy/convai-desktop-pet#readme)
-            for what's inside, then download the installer for your OS below
-            (Windows: .exe · macOS: .dmg · Linux: .deb / .AppImage).
+          releaseBody: 'Release notes are being generated…'
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Replace the placeholder body of the draft with the actual changes: one
+  # bullet per commit since the previous tag, plus a compare link. Runs only
+  # after every platform uploaded, so publishing the draft is the last step.
+  release-notes:
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write commit-based notes into the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          {
+            echo "## Changes"
+            echo ""
+            if [ -n "$PREV" ]; then
+              git log --no-merges --pretty='- %s' "${PREV}..${TAG}"
+              echo ""
+              echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
+            else
+              git log --no-merges --pretty='- %s' "${TAG}"
+            fi
+            echo ""
+            echo "Download the installer for your OS below (Windows: .exe · macOS: .dmg · Linux: .deb / .AppImage)."
+          } > notes.md
+          # Drafts are invisible to /releases/tags/:tag — look the id up by tag.
+          RID=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq ".[] | select(.tag_name==\"${TAG}\") | .id" | head -1)
+          jq -n --rawfile body notes.md '{body: $body}' \
+            | gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RID}" --input - > /dev/null
+          echo "Release ${TAG} (id ${RID}) notes updated:"
+          cat notes.md

@@ -480,7 +480,9 @@ class OverlayRuntime {
       case 'platform-lost':
         this.narrate(
           ev.pet,
-          `The window you were standing on ("${ev.windowTitle}") just moved — you are falling!`,
+          ev.covered
+            ? `The window you were standing on ("${ev.windowTitle}") just got covered by another window — you are falling!`
+            : `The window you were standing on ("${ev.windowTitle}") just moved — you are falling!`,
         );
         break;
       case 'meet': {

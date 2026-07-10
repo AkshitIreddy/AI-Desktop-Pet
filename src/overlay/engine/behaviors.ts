@@ -10,6 +10,7 @@
 import type { AppSettings, EdgeSide, Platform } from '../../shared/types';
 import type { DirectorApi, DirectorEvent, MonitorRegion, OverlayEnv, PetHandle } from './api';
 import { climbEligible } from './PetEngine';
+import { edgePartlyVisible } from './platforms';
 import {
   MAX_HOP_STEP_UP,
   leftmostMonitor,
@@ -94,7 +95,10 @@ export function v1WalkDistance(width: number): number {
 function windowPlatforms(env: OverlayEnv, pet?: PetHandle): Platform[] {
   const m = pet ? monitorOf(env, pet) : null;
   return env.platforms.filter(
-    (p) => climbEligible(p, env) && (!m || (p.right > m.left && p.left < m.right)),
+    (p) =>
+      climbEligible(p, env) &&
+      edgePartlyVisible(p) &&
+      (!m || (p.right > m.left && p.left < m.right)),
   );
 }
 
