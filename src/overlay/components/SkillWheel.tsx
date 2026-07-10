@@ -57,6 +57,11 @@ const GATE_LABEL: Record<NonNullable<SkillDef['gatedBy']>, string> = {
 
 export function SkillWheel({ petName }: { petName: string }) {
   const settings = useOverlayStore((s) => s.settings);
+  // Scale the whole wheel with the pet-size setting: a fixed 320 px wheel
+  // reads tiny on dense displays where users bump pets to 150%+. The SVG
+  // scales via viewBox (crisp), hub/tooltip via transforms.
+  const k = clamp(settings.petSize / 100, 1, 2);
+  const box = SIZE * k;
   const [hover, setHover] = useState<number | null>(null);
   const [, setBump] = useState(0);
   const [status, setStatus] = useState<ConvaiStatus | null>(null);
@@ -96,23 +101,23 @@ export function SkillWheel({ petName }: { petName: string }) {
       // bottom lies under the taskbar. floorY (work-area bottom) keeps the
       // whole wheel visible above the taskbar.
       const m = monitorAt(env, f.x + f.size / 2);
-      const x = clamp(f.x + f.size / 2 - SIZE / 2, m.left + 8, m.right - SIZE - 8);
-      const y = clamp(f.y + f.size / 2 - SIZE / 2, m.top + 8, m.floorY - SIZE - 8);
-      hitRegionRegistry.set('wheel', { x, y, w: SIZE, h: SIZE });
+      const x = clamp(f.x + f.size / 2 - box / 2, m.left + 8, m.right - box - 8);
+      const y = clamp(f.y + f.size / 2 - box / 2, m.top + 8, m.floorY - box - 8);
+      hitRegionRegistry.set('wheel', { x, y, w: box, h: box });
       const t = `translate3d(${x}px, ${y}px, 0)`;
       if (t === lastTransform) return;
       lastTransform = t;
       el.style.transform = t;
       // Near the floor the hover tooltip (which hangs below the wheel) would
       // be clipped — flip it above the wheel instead.
-      if (y + SIZE > m.floorY - 64) el.dataset.tipAbove = 'true';
+      if (y + box > m.floorY - 64) el.dataset.tipAbove = 'true';
       else delete el.dataset.tipAbove;
     });
     return () => {
       off();
       hitRegionRegistry.set('wheel', null);
     };
-  }, [petName]);
+  }, [petName, box]);
 
   // Escape closes; clicks elsewhere in the webview close too (pets excluded —
   // their own click handler decides whether to toggle or move the wheel).
@@ -175,10 +180,14 @@ export function SkillWheel({ petName }: { petName: string }) {
   };
 
   return (
-    <div ref={wrapRef} className="skill-wheel" style={{ width: SIZE, height: SIZE }}>
+    <div
+      ref={wrapRef}
+      className="skill-wheel"
+      style={{ width: box, height: box, '--wheel-scale': k } as React.CSSProperties}
+    >
       <motion.svg
-        width={SIZE}
-        height={SIZE}
+        width={box}
+        height={box}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
         initial={reduce ? false : { scale: 0.85, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -245,8 +254,8 @@ export function SkillWheel({ petName }: { petName: string }) {
 
       <motion.div
         className="wheel-hub"
-        initial={reduce ? false : { scale: 0.6, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
+        initial={reduce ? false : { scale: 0.6 * k, opacity: 0 }}
+        animate={{ scale: k, opacity: 1 }}
         transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 26 }}
       >
         <span className={`activity-dot act-${activity}`} />

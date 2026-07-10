@@ -421,7 +421,9 @@ body {
   position: absolute;
   left: 50%;
   top: calc(100% + 6px);
-  transform: translateX(-50%);
+  /* --wheel-scale follows the pet-size setting (set inline by SkillWheel). */
+  transform: translateX(-50%) scale(var(--wheel-scale, 1));
+  transform-origin: top center;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -440,6 +442,7 @@ body {
 .skill-wheel[data-tip-above='true'] .wheel-tip {
   top: auto;
   bottom: calc(100% + 6px);
+  transform-origin: bottom center;
 }
 
 .wheel-tip strong {
