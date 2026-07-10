@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "convai-desktop-pet"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "base64 0.22.1",
  "image",
