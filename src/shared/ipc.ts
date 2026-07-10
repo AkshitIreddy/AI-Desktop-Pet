@@ -53,6 +53,12 @@ export const ipc = {
   /** Old Electron install's config.json contents, or null. */
   readLegacyConfig: () =>
     invoke<Record<string, unknown> | null>('read_legacy_config'),
+  /**
+   * Write the Windows per-app GPU preference for this exe + the WebView2
+   * runtime exe. No-op on other platforms; applies on next app start.
+   */
+  setGpuPreference: (pref: string) =>
+    invoke<void>('set_gpu_preference', { pref }),
 };
 
 /* ------------------------------ event helpers ------------------------------ */

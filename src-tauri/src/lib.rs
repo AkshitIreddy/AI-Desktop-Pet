@@ -1,4 +1,5 @@
 mod capture;
+mod gpu_pref;
 mod mic_permission;
 mod overlay;
 mod sprites;
@@ -320,6 +321,7 @@ pub fn run() {
             win_info::list_windows,
             capture::capture_screen,
             sprites::import_sprite_set,
+            gpu_pref::set_gpu_preference,
             get_work_area,
             get_monitors,
             show_main_window,

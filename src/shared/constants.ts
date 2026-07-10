@@ -69,6 +69,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoConnect: true,
   autoCloseChatOnSend: true,
   autoCloseWheelOnSelect: true,
+  gpuPreference: 'default',
   hotkeys: {},
 };
 

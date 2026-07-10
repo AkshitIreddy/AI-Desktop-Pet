@@ -10,6 +10,7 @@ import { sounds } from '../../shared/sounds';
 import type { ChatEntry, ConvaiStatus } from '../../shared/types';
 import { messageOf } from '../../skills/handlers';
 import { hitRegionRegistry } from '../engine/hitRegions';
+import { monitorAt } from '../engine/monitors';
 import { activityLabel, clamp, overlayUi, runtime, useOverlayStore } from '../runtime';
 import { VisionBadge } from './VisionBadge';
 
@@ -54,12 +55,15 @@ function initialAnchor(petName: string): { x: number; y: number } {
   const env = runtime.env;
   const pet = runtime.director.pets.get(petName);
   if (!pet) return { x: (env.width - W) / 2, y: (env.height - H) / 2 };
+  // Open on the monitor the pet is on, above its taskbar — the union bounds
+  // can reach past this screen's edges (see SkillWheel).
   const b = pet.bbox();
+  const m = monitorAt(env, b.x + b.w / 2);
   let x = b.x + b.w + 16;
-  if (x + W > env.width - 8) x = b.x - W - 16;
+  if (x + W > m.right - 8) x = b.x - W - 16;
   return {
-    x: clamp(x, 8, env.width - W - 8),
-    y: clamp(b.y + b.h / 2 - H / 2, 8, env.height - H - 8),
+    x: clamp(x, m.left + 8, m.right - W - 8),
+    y: clamp(b.y + b.h / 2 - H / 2, m.top + 8, m.floorY - H - 8),
   };
 }
 

@@ -11,6 +11,7 @@ import { appStore } from '../../shared/store';
 import type { Reminder } from '../../shared/types';
 import { messageOf } from '../../skills/handlers';
 import { hitRegionRegistry } from '../engine/hitRegions';
+import { monitorAt } from '../engine/monitors';
 import { clamp, displayNameOf, overlayUi, runtime, useOverlayStore } from '../runtime';
 
 const W = 320;
@@ -80,10 +81,15 @@ export function ReminderComposer({ petName }: { petName: string }) {
     const env = runtime.env;
     const pet = runtime.director.pets.get(petName);
     if (!pet) return { x: (env.width - W) / 2, y: env.height / 2 - 140 };
+    // Anchor on the pet's own monitor, above its taskbar (see SkillWheel).
     const b = pet.bbox();
+    const m = monitorAt(env, b.x + b.w / 2);
     let x = b.x + b.w + 14;
-    if (x + W > env.width - 8) x = b.x - W - 14;
-    return { x: clamp(x, 8, env.width - W - 8), y: clamp(b.y - 60, 8, env.height - 300) };
+    if (x + W > m.right - 8) x = b.x - W - 14;
+    return {
+      x: clamp(x, m.left + 8, m.right - W - 8),
+      y: clamp(b.y - 60, m.top + 8, m.floorY - 300),
+    };
   }, [petName]);
 
   // Focus lease + Escape to close + live reminder list.

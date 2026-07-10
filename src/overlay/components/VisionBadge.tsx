@@ -48,6 +48,7 @@ export function VisionBadge({
     if (variant !== 'floating') return;
     const env = runtime.env;
     const regionId = `vision:${petName}`;
+    let lastTransform = '';
     const off = runtime.onPetFrame(petName, (f) => {
       const el = wrapRef.current;
       if (!el) return;
@@ -61,8 +62,11 @@ export function VisionBadge({
       const h = el.offsetHeight || 26;
       const x = clamp(f.x + f.size / 2 - w / 2, 8, env.width - w - 8);
       const y = Math.max(8, f.y - h - 60);
-      el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
       hitRegionRegistry.set(regionId, { x, y, w, h });
+      const t = `translate3d(${x}px, ${y}px, 0)`;
+      if (t === lastTransform) return;
+      lastTransform = t;
+      el.style.transform = t;
     });
     return () => {
       off();

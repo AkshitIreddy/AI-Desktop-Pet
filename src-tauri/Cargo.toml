@@ -1,6 +1,6 @@
 [package]
 name = "convai-desktop-pet"
-version = "2.1.0"
+version = "2.1.1"
 description = "AI-powered desktop companions built with Tauri and Convai"
 authors = ["Akshit Ireddy"]
 edition = "2021"
@@ -36,7 +36,9 @@ windows = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
   "Win32_Graphics_Dwm",
   "Win32_System_Threading",
+  "Win32_System_Diagnostics_ToolHelp",
 ] }
+winreg = "0.55"
 
 [profile.release]
 panic = "abort"

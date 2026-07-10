@@ -3,12 +3,14 @@ import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { sounds } from '../../shared/sounds';
 import type {
+  GpuPreference,
   HotkeyAction,
   SoundPack,
   SpeechBubbleStyle,
   ThemeMode,
 } from '../../shared/types';
 import { HOTKEY_ACTIONS } from '../../shared/types';
+import { ipc } from '../../shared/ipc';
 import { fuzzyScore } from '../search';
 import { useDashboard } from '../state';
 import { HotkeyRecorder } from '../components/HotkeyRecorder';
@@ -64,7 +66,7 @@ const HAY = {
   hotkeys:
     'hotkeys global shortcuts keyboard bindings combo open chat toggle voice vision take a look notes reminder dance party skill wheel',
   system:
-    'system start with windows autostart login idle sleep nap onboarding tour replay reset all settings defaults restore',
+    'system start with windows autostart login idle sleep nap onboarding tour replay reset all settings defaults restore gpu graphics card integrated dedicated discrete power saving high performance renderer usage',
 } as const;
 
 /** FieldRow whose label glows when it matches the settings search query. */
@@ -168,6 +170,16 @@ export function SettingsPage() {
       toast('Could not update “start with Windows”.', 'error');
     } finally {
       setAutostartBusy(false);
+    }
+  };
+
+  const applyGpuPreference = async (gpuPreference: GpuPreference) => {
+    try {
+      await ipc.setGpuPreference(gpuPreference);
+      await saveSettings({ gpuPreference });
+      toast('GPU preference saved — restart the app to apply it.', 'success');
+    } catch {
+      toast('Could not update the GPU preference.', 'error');
     }
   };
 
@@ -774,6 +786,30 @@ export function SettingsPage() {
               disabled={autostartBusy}
               onChange={(next) => void toggleAutostart(next)}
               label="Start with Windows"
+            />
+          </Row>
+          <Row
+            q={q}
+            label="GPU"
+            hay="graphics card integrated dedicated discrete power performance renderer"
+            hint={
+              <>
+                Which GPU draws the pets (Windows). Applied via Windows graphics
+                settings for the app <em>and</em> its WebView2 runtime — the
+                runtime entry is shared with other WebView2 apps. Restart the
+                app to apply.
+              </>
+            }
+          >
+            <Segmented<GpuPreference>
+              ariaLabel="GPU preference"
+              value={s.gpuPreference}
+              options={[
+                { value: 'default', label: 'Windows default' },
+                { value: 'power-saving', label: 'Power saving', title: 'Integrated GPU' },
+                { value: 'high-performance', label: 'High performance', title: 'Dedicated GPU' },
+              ]}
+              onChange={(pref) => void applyGpuPreference(pref)}
             />
           </Row>
           <Row

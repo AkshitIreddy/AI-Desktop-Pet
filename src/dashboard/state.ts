@@ -5,7 +5,7 @@
  * directly).
  */
 import { create } from 'zustand';
-import { notifyCharactersChanged, notifySettingsChanged } from '../shared/ipc';
+import { ipc, notifyCharactersChanged, notifySettingsChanged } from '../shared/ipc';
 import { sounds } from '../shared/sounds';
 import { appStore } from '../shared/store';
 import { applyTheme } from '../shared/theme';
@@ -108,6 +108,11 @@ export const useDashboard = create<DashboardState>((set, get) => ({
       settings: { ...state.settings },
       characters: snapshotCharacters(),
     });
+    // Re-assert the GPU preference each launch: the registry entry names the
+    // WebView2 runtime exe by full path, which changes on runtime updates.
+    if (state.settings.gpuPreference !== 'default') {
+      void ipc.setGpuPreference(state.settings.gpuPreference).catch(() => {});
+    }
   },
 
   async saveSettings(patch) {

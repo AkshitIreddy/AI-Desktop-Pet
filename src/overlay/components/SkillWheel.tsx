@@ -11,6 +11,7 @@ import type { ConvaiStatus, SkillDef } from '../../shared/types';
 import { SKILLS } from '../../skills/registry';
 import { getSkillState, runSkill } from '../../skills/handlers';
 import { hitRegionRegistry } from '../engine/hitRegions';
+import { monitorAt } from '../engine/monitors';
 import { activityLabel, clamp, overlayUi, runtime, useOverlayStore } from '../runtime';
 
 const SIZE = 320;
@@ -80,6 +81,7 @@ export function SkillWheel({ petName }: { petName: string }) {
   // Follow the pet each frame; keep the wheel fully on-screen; hit region.
   useEffect(() => {
     const env = runtime.env;
+    let lastTransform = '';
     const off = runtime.onPetFrame(petName, (f) => {
       const el = wrapRef.current;
       if (!el) return;
@@ -89,10 +91,22 @@ export function SkillWheel({ petName }: { petName: string }) {
         return;
       }
       el.style.display = '';
-      const x = clamp(f.x + f.size / 2 - SIZE / 2, 8, env.width - SIZE - 8);
-      const y = clamp(f.y + f.size / 2 - SIZE / 2, 8, env.height - SIZE - 8);
-      el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+      // Clamp to the monitor under the pet, not the all-monitors union: the
+      // union can extend past this screen's bottom edge, and even alone its
+      // bottom lies under the taskbar. floorY (work-area bottom) keeps the
+      // whole wheel visible above the taskbar.
+      const m = monitorAt(env, f.x + f.size / 2);
+      const x = clamp(f.x + f.size / 2 - SIZE / 2, m.left + 8, m.right - SIZE - 8);
+      const y = clamp(f.y + f.size / 2 - SIZE / 2, m.top + 8, m.floorY - SIZE - 8);
       hitRegionRegistry.set('wheel', { x, y, w: SIZE, h: SIZE });
+      const t = `translate3d(${x}px, ${y}px, 0)`;
+      if (t === lastTransform) return;
+      lastTransform = t;
+      el.style.transform = t;
+      // Near the floor the hover tooltip (which hangs below the wheel) would
+      // be clipped — flip it above the wheel instead.
+      if (y + SIZE > m.floorY - 64) el.dataset.tipAbove = 'true';
+      else delete el.dataset.tipAbove;
     });
     return () => {
       off();

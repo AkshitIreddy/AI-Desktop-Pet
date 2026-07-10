@@ -1277,7 +1277,11 @@ export class Pet implements PetHandle {
       case 'sleeping': {
         const flip = this.facingDir === 'right' ? -1 : 1;
         if (this.env.settings.reduceMotion) return `scaleX(${flip}) rotate(0deg)`;
-        const pulse = (1 + 0.02 * Math.sin(now / 600)).toFixed(4);
+        // Quantized to 100 ms steps: a fresh transform string every rAF tick
+        // kept the compositor repainting the fullscreen transparent overlay
+        // at display refresh rate for as long as any pet slept. The ±2%
+        // breath over a 3.8 s period is indistinguishable at 10 Hz.
+        const pulse = (1 + 0.02 * Math.sin((now - (now % 100)) / 600)).toFixed(4);
         return `scaleX(${flip}) rotate(0deg) scale(${pulse})`;
       }
       default:

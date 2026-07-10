@@ -45,6 +45,7 @@ export function SpeechBubble({ petName }: { petName: string }) {
   // Follow the pet each frame; keep the tail pointed at the pet when clamped.
   useEffect(() => {
     const env = runtime.env;
+    let lastTransform = '';
     return runtime.onPetFrame(petName, (f) => {
       const el = anchorRef.current;
       if (!el) return;
@@ -59,7 +60,10 @@ export function SpeechBubble({ petName }: { petName: string }) {
       const petCx = f.x + f.size / 2;
       const x = clamp(petCx - w / 2, 8, env.width - w - 8);
       const y = Math.max(8, f.y - h - 14);
-      el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+      const t = `translate3d(${x}px, ${y}px, 0)`;
+      if (t === lastTransform) return;
+      lastTransform = t;
+      el.style.transform = t;
       el.style.setProperty('--tail-x', `${clamp(petCx - x, 16, w - 16)}px`);
     });
   }, [petName]);

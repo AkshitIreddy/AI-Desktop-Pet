@@ -132,6 +132,8 @@ export interface CharacterRecord {
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type SpeechBubbleStyle = 'glass' | 'solid' | 'retro';
 export type SoundPack = 'soft' | 'glass' | 'retro' | 'off';
+/** Windows per-app GPU choice (Settings → Display → Graphics equivalent). */
+export type GpuPreference = 'default' | 'power-saving' | 'high-performance';
 
 export interface AppSettings {
   apiKey: string;
@@ -179,6 +181,13 @@ export interface AppSettings {
   autoCloseChatOnSend: boolean;
   /** Close the skill wheel right after picking any skill. */
   autoCloseWheelOnSelect: boolean;
+  /**
+   * Which GPU renders the app (Windows only; applies after restart). Written
+   * to the Windows graphics-preference registry for BOTH this exe and the
+   * WebView2 runtime exe — the pets are drawn by WebView2's own GPU process,
+   * which the host exe's preference alone does not cover.
+   */
+  gpuPreference: GpuPreference;
   /**
    * Global hotkeys: action id → accelerator (e.g. "CommandOrControl+Alt+C").
    * Actions target the most recently interacted-with (else first) spawned pet.

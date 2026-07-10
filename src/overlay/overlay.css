@@ -436,6 +436,12 @@ body {
   text-align: center;
 }
 
+/* Wheel clamped near the floor: hang the tooltip above instead. */
+.skill-wheel[data-tip-above='true'] .wheel-tip {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
 .wheel-tip strong {
   font-size: 12px;
 }
