@@ -50,7 +50,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   windowWalking: true,
   cursorInteractions: true,
   characterInteractions: true,
-  chatterFrequency: 35,
+  // 0 = Off: characters never strike up conversations with each other on
+  // their own unless the user raises the slider (Friend chat stays available
+  // from the wheel — invoking it IS user consent).
+  chatterFrequency: 0,
   speechBubbleStyle: 'glass',
   speechBubbleFontSize: 14,
   speechBubbleSeconds: 6,
@@ -75,7 +78,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 /** Old defaults that changed since 2.1 — stored values equal to these are bumped. */
 export const LEGACY_DEFAULT_BUMPS: Array<{
-  key: 'activityLevel' | 'freeWillFrequency' | 'idleSleepMinutes';
+  key: 'activityLevel' | 'freeWillFrequency' | 'idleSleepMinutes' | 'chatterFrequency';
   from: number;
   to: number;
 }> = [
@@ -83,6 +86,8 @@ export const LEGACY_DEFAULT_BUMPS: Array<{
   { key: 'freeWillFrequency', from: 30, to: 55 },
   // Naps surprised people ("where did she go?") — off unless opted into.
   { key: 'idleSleepMinutes', from: 10, to: 0 },
+  // Unprompted character↔character talk is opt-in now.
+  { key: 'chatterFrequency', from: 35, to: 0 },
 ];
 
 /** Base timing constants of the v1 shimeji engine (before animationSpeed scaling). */

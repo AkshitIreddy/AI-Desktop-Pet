@@ -493,7 +493,7 @@ export function SettingsPage() {
             q={q}
             label="Chatter frequency"
             hay="conversations crosstalk talk often"
-            hint="How often nearby characters strike up conversations."
+            hint="How often nearby characters strike up conversations on their own. Off by default — raise it to allow unprompted character-to-character talk."
           >
             <Slider
               label="Chatter frequency"

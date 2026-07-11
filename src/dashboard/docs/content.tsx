@@ -217,7 +217,7 @@ const SETTING_ROWS: Array<{ name: string; range: string; def: string; what: stri
   { name: 'Window walking', range: 'on / off', def: D.windowWalking ? 'on' : 'off', what: 'Lets pets treat your app windows as terrain: top-edge walks, sill sits, peeks, new-window curiosity, and the “Climb my window” skill.' },
   { name: 'Cursor interactions', range: 'on / off', def: D.cursorInteractions ? 'on' : 'off', what: 'Cursor chasing, watching and inspecting, plus the “Follow cursor” skill.' },
   { name: 'Character interactions', range: 'on / off', def: D.characterInteractions ? 'on' : 'off', what: 'All multi-pet behaviors — strolls, greetings, parades — plus “Summon friends” and “Friend chat”.' },
-  { name: 'Chatter frequency', range: '0–100', def: `${D.chatterFrequency}`, what: 'How often spawned characters strike up conversations with each other on their own.' },
+  { name: 'Chatter frequency', range: '0–100', def: D.chatterFrequency ? `${D.chatterFrequency}` : 'off', what: 'How often spawned characters strike up conversations with each other on their own. Off = never unprompted.' },
   { name: 'Speech bubbles', range: 'glass · solid · retro / 12–20 px / 2–15 s', def: `${D.speechBubbleStyle}, ${D.speechBubbleFontSize} px, ${D.speechBubbleSeconds} s`, what: 'Bubble style, text size, and how long a bubble lingers after the voice finishes.' },
   { name: 'Voice volume', range: '0–100', def: `${D.voiceVolume}`, what: 'Loudness of character voices. Each character also has its own voice on/off toggle.' },
   { name: 'Sound effects', range: 'soft · glass · retro · off / 0–100', def: `${D.soundPack}, ${D.sfxVolume}`, what: 'UI cue pack (wheel, messages, chimes, landings) and its volume. All synthesized — the app ships zero audio files.' },
@@ -566,12 +566,14 @@ export const DOC_SECTIONS: DocSection[] = [
             <strong>Friend chat</strong> skill.
           </li>
           <li>
-            <strong>Meet &amp; greet.</strong> Left alone, pets wander over to each other, face
-            off, and exchange a few words on their own.
+            <strong>Meet &amp; greet.</strong> Left alone, pets wander over to each other and
+            face off — and, when Chatter frequency is turned up, exchange a few words on
+            their own.
           </li>
           <li>
             <strong>Chatter frequency.</strong> The Settings slider decides how often
-            spontaneous conversations spark — from library-silent to sitcom.
+            spontaneous conversations spark — from library-silent to sitcom. Off by
+            default: characters never talk to each other unprompted until you raise it.
           </li>
           <li>
             <strong>Quiet hours.</strong> During your configured window, all unprompted talk
