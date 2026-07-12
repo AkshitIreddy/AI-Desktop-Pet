@@ -1,6 +1,6 @@
 [package]
 name = "convai-desktop-pet"
-version = "2.1.4"
+version = "2.1.5"
 description = "AI-powered desktop companions built with Tauri and Convai"
 authors = ["Akshit Ireddy"]
 edition = "2021"
