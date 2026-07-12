@@ -9,7 +9,7 @@ WALL = os.path.join(HERE, "wallpaper.png")
 CAST = ["klee", "venti", "ayaka", "albedo"]
 BANNED = ["spongebob", "deadpool", "cartman"]
 CLIPW, CLIPH, PET_SIZE = 1280, 640, 108
-FPS, DURATION = 12, 17
+FPS, DURATION = 15, 19
 
 
 def http_json():

@@ -57,11 +57,14 @@
   #__browser .tb{background:#dfe3ea;height:44px;color:#333}
   #__browser .tab{background:#fff;border-radius:9px 9px 0 0;padding:7px 14px;font-size:12.5px;display:flex;align-items:center;gap:7px;box-shadow:0 -1px 3px rgba(0,0,0,.08)}
   #__browser .addr{flex:1;background:#fff;border-radius:16px;height:26px;display:flex;align-items:center;gap:7px;padding:0 12px;font-size:12.5px;color:#555;border:1px solid #cfd4dc}
-  #__browser .page{height:calc(100% - 44px);background:linear-gradient(160deg,#1b1233,#3a1d6e 55%,#e0508a);position:relative;color:#fff;padding:26px 28px}
-  #__browser .page h1{font-size:26px;margin:10px 0 8px;font-weight:700}
-  #__browser .page p{font-size:13.5px;opacity:.88;max-width:74%;line-height:1.55}
-  #__browser .page .pill{display:inline-block;margin-top:18px;background:#fff;color:#3a1d6e;font-size:13px;font-weight:600;padding:8px 18px;border-radius:22px}
-  #__browser .page .blob{position:absolute;border-radius:50%;filter:blur(7px);opacity:.5}
+  #__browser .page{height:calc(100% - 44px);background:#fff;color:#202122;position:relative;padding:20px 26px;overflow:hidden;font-family:Georgia,'Times New Roman',serif}
+  #__browser .page .wtitle{font-size:26px;border-bottom:1px solid #a2a9b1;padding-bottom:6px;margin:0 0 3px;font-weight:400}
+  #__browser .page .wsub{font-size:12px;color:#54595d;font-style:italic;margin-bottom:12px}
+  #__browser .page p{font-size:13.5px;line-height:1.62;color:#202122;max-width:60%;margin:0 0 9px}
+  #__browser .page a{color:#3366cc}
+  #__browser .page .info{position:absolute;top:58px;right:22px;width:150px;background:#f8f9fa;border:1px solid #a2a9b1;border-radius:4px;padding:10px;font-family:Arial,sans-serif;font-size:11px;color:#202122;text-align:center}
+  #__browser .page .info .thumb{height:82px;border-radius:3px;background:linear-gradient(135deg,#2b6cb0,#e0508a);display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:6px}
+  #__browser .page .info b{display:block;margin-bottom:4px;font-size:11.5px}
   #__tb{position:absolute;left:0;bottom:0;width:100%;height:${TASKBAR}px;background:rgba(26,26,32,.74);backdrop-filter:blur(24px) saturate(1.3);border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center}
   #__tb .mid{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:14px;align-items:center}
   #__tb .ic{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center}
@@ -83,13 +86,13 @@
   scene.innerHTML = `
   <div class="wall"></div>
   <div class="win" id="__browser">
-    <div class="tb"><span class="tab">🌐 Convai · Desktop Pets</span><span class="addr">🔒 convai.com/desktop-pets</span></div>
+    <div class="tb"><span class="tab">📖 Desktop mascot — Wikipedia</span><span class="addr">🔒 en.wikipedia.org/wiki/Desktop_mascot</span></div>
     <div class="page">
-      <div class="blob" style="width:150px;height:150px;background:#ff7ab6;top:-24px;right:-14px"></div>
-      <div class="blob" style="width:110px;height:110px;background:#7c5cff;bottom:14px;right:70px"></div>
-      <h1>Your desktop, alive.</h1>
-      <p>AI companions that walk your screen, climb your windows, and chat with you — powered by Convai.</p>
-      <span class="pill">Download for Windows</span>
+      <h1 class="wtitle">Desktop mascot</h1>
+      <div class="wsub">From Wikipedia, the free encyclopedia</div>
+      <div class="info"><div class="thumb">🐾</div><b>Desktop mascot</b>An animated on-screen companion</div>
+      <p>A <a>desktop mascot</a> is a small program that displays an animated character on a computer desktop. Mascots typically <a>walk</a> around, react to the cursor, and climb application windows.</p>
+      <p>They add a playful presence without interrupting the user's work. <a>Shimeji</a>-style characters roam freely across the screen.</p>
     </div>
   </div>
   <div class="win" id="__code">
@@ -124,6 +127,7 @@
 
   // ---- pets ---------------------------------------------------------------
   P.appStore.state.settings.petSize = PET;
+  P.appStore.state.settings.animationSpeed = 0.8; // calmer, slower motion
   P.appStore.state.settings.windowWalking = false;
   P.appStore.state.settings.cursorInteractions = false;
   for (const n of [...dir.pets.keys()]) dir.despawn(n);
@@ -132,6 +136,7 @@
   const want = __CAST__.filter(n => avail.includes(n));
   const cast = (want.length ? want : avail).slice(0, 4);
   for (const n of cast) dir.spawn(P.appStore.state.characters[n]);
+  dir.applySettings(P.appStore.state.settings); // propagate the slower speed to pets
   dir.setSuspended(true);
 
   const codeWin = { kind: 'window', windowId: 90001, y: codeTop, left: codeLeft, right: codeRight, bottom: codeBottom, cover: [] };
