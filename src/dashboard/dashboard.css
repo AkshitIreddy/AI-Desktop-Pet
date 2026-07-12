@@ -974,6 +974,9 @@ p {
   height: 76px;
   object-fit: contain;
   image-rendering: pixelated;
+  /* Continuous bob is intentional charm while the dashboard is open. It only
+     costs GPU when the window is actually focused/visible — the body.cdp-idle
+     rule (below) freezes it whenever the window is hidden/minimized. */
   animation: cdp-bob 3.4s ease-in-out infinite;
   filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.35));
 }
@@ -986,6 +989,15 @@ p {
   50% {
     transform: translateY(-6px);
   }
+}
+
+/* Freeze all animations while the window isn't focused/visible (see App.tsx).
+   A minimized/hidden Tauri window keeps rendering in WebView2, so pausing the
+   animations is what actually lets the GPU process go idle. */
+body.cdp-idle *,
+body.cdp-idle *::before,
+body.cdp-idle *::after {
+  animation-play-state: paused !important;
 }
 
 .cdp-char-name {

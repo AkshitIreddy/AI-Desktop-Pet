@@ -1,6 +1,6 @@
 /**
  * OverlayRuntime — boots the pet engine + Convai layer, owns the single
- * requestAnimationFrame loop, imperatively drives pet DOM nodes, and feeds a
+ * timer-paced animation loop, imperatively drives pet DOM nodes, and feeds a
  * lightweight zustand store that the React tree renders from.
  *
  * React never re-renders on pet movement: PetLayer registers refs here and the
@@ -222,13 +222,21 @@ function toEnvMonitors(vs: VirtualScreen): MonitorRegion[] {
   }));
 }
 
+/** Loop interval while something is moving (~60 Hz sim, ~30 Hz DOM writes). */
+const ACTIVE_TICK_MS = 16;
+/** Decision-poll interval while the scene is at rest (compositor asleep). */
+const IDLE_TICK_MS = 100;
+
 class OverlayRuntime {
   env!: OverlayEnv;
   director!: DirectorRuntime;
   layer!: ConvaiLayer;
 
-  private raf = 0;
-  private lastLoopAt = 0;
+  private timer = 0;
+  private lastSimAt = 0;
+  private lastDrawAt = 0;
+  /** While `now < forceActiveUntil` the loop stays at 60 Hz (drag/spawn grace). */
+  private forceActiveUntil = 0;
   private started = false;
   private petRefs = new Map<string, PetRefs>();
   private frameSubs = new Map<string, Set<(f: PetFrameInfo) => void>>();
@@ -295,18 +303,21 @@ class OverlayRuntime {
       // the overlay only makes the pet celebrate.
       onReminderDue((r) => {
         const pet = this.director.pets.get(r.characterName);
-        if (pet && !pet.hidden) void pet.playSpecial().catch(() => {});
+        if (pet && !pet.hidden) {
+          this.wake();
+          void pet.playSpecial().catch(() => {});
+        }
       }),
       onOpenChatRequest((name) => overlayUi.openChat(name)),
     ]);
 
     useOverlayStore.setState({ ready: true, settings: { ...settings } });
-    this.raf = requestAnimationFrame(this.loop);
+    this.timer = window.setTimeout(this.loop, 0);
     await ipc.overlayReady();
     void syncHotkeys(settings);
 
     window.addEventListener('beforeunload', () => {
-      cancelAnimationFrame(this.raf);
+      if (this.timer) clearTimeout(this.timer);
       void this.layer.disposeAll();
     });
   }
@@ -359,6 +370,7 @@ class OverlayRuntime {
       const ny = clamp(pet.y, 0, Math.max(0, this.env.height - pet.size));
       if (nx !== pet.x || ny !== pet.y) pet.teleport(nx, ny);
     }
+    this.wake();
   }
 
   /* --------------------------- settings & characters --------------------------- */
@@ -374,6 +386,7 @@ class OverlayRuntime {
     void syncHotkeys(s);
     this.syncCursorStream();
     this.kickAutoConnect();
+    this.wake();
   }
 
   /**
@@ -415,6 +428,7 @@ class OverlayRuntime {
     this.syncCursorStream();
     this.kickAutoConnect();
     useOverlayStore.setState({ settings: { ...appStore.state.settings } });
+    this.wake();
   }
 
   private despawnPet(name: string): void {
@@ -520,32 +534,60 @@ class OverlayRuntime {
 
   /* --------------------------------- rAF loop ---------------------------------- */
 
-  private loop = (now: number): void => {
-    this.raf = requestAnimationFrame(this.loop);
-    // Cap the sim + DOM writes at ~60 fps. rAF fires at display refresh, and
-    // on high-refresh monitors (common on ultrawides) that both sped pets up
-    // (move steps are 12 ms-gated, so more ticks = more steps) and multiplied
-    // compositor work on the fullscreen transparent overlay for no visible
-    // gain — sprite frames only advance every 200 ms.
-    //
-    // And when EVERY pet is visually idle (standing/sleeping/hidden), drop to
-    // ~16 fps: nothing on screen changes between ticks, so the loop only
-    // needs enough cadence to notice a behavior starting. The first tick
-    // after motion resumes restores 60 fps within ~62 ms — imperceptible for
-    // the calm, stepped shimeji movement.
-    let idle = true;
-    if (this.director) {
-      for (const pet of this.director.pets.values()) {
-        if (!pet.visuallyIdle) {
-          idle = false;
-          break;
-        }
+  private loop = (): void => {
+    const now = performance.now();
+    if (!this.director) {
+      this.timer = window.setTimeout(this.loop, IDLE_TICK_MS);
+      return;
+    }
+    // Advance the sim at ~60 Hz — movement is one step per tick, so this keeps
+    // pet speed constant and independent of the draw rate below.
+    if (now - this.lastSimAt >= 15) {
+      this.lastSimAt = now;
+      this.director.tick(now);
+    }
+
+    // One pass over the pets: is anything moving, and is one being dragged?
+    let active = now < this.forceActiveUntil;
+    let dragging = false;
+    for (const pet of this.director.pets.values()) {
+      if (pet.state === 'dragging') {
+        dragging = true;
+        active = true;
+      } else if (!pet.visuallyIdle) {
+        active = true;
       }
     }
-    if (now - this.lastLoopAt < (idle ? 62 : 15.5)) return;
-    this.lastLoopAt = now;
-    this.director.tick(now);
 
+    // Flush pet transforms to the DOM at ~30 Hz (60 Hz while a pet is grabbed).
+    if (now - this.lastDrawAt >= (dragging ? 15 : 31)) {
+      this.lastDrawAt = now;
+      this.drawPets();
+    }
+
+    // Pace with a timer, NOT requestAnimationFrame. A pending rAF makes Chromium
+    // drive its whole compositor at the panel's refresh rate — on a high-refresh
+    // display (this dev's is ~220 Hz) that pins the GPU re-compositing the
+    // fullscreen transparent overlay even though we only need ~60/30 Hz. A timer
+    // wakes the compositor only when we actually write the DOM, and drops to a
+    // slow poll while everything is at rest so the GPU can idle entirely.
+    this.timer = window.setTimeout(this.loop, active ? ACTIVE_TICK_MS : IDLE_TICK_MS);
+  };
+
+  /**
+   * Jump to the active tick rate at once for motion triggered from OUTSIDE the
+   * loop (drag, spawn, settings/display change) so it renders immediately
+   * instead of waiting out the slow idle poll.
+   */
+  wake(ms = 300): void {
+    if (!this.started) return;
+    this.forceActiveUntil = performance.now() + ms;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = window.setTimeout(this.loop, 0);
+  }
+
+  /** Write pet position/frame/state to the DOM and fan out per-frame follows. */
+  private drawPets(): void {
     for (const [name, pet] of this.director.pets) {
       const refs = this.petRefs.get(name);
       if (refs) {
@@ -607,7 +649,7 @@ class OverlayRuntime {
     }
 
     this.publishSnapshots();
-  };
+  }
 
   private publishSnapshots(): void {
     const pets: PetSnapshot[] = [];
@@ -684,6 +726,7 @@ class OverlayRuntime {
 
   /** Reference-counted director suspension (drag in progress, wheel open…). */
   setSuspendKey(key: string, on: boolean): void {
+    if (on) this.wake(); // a drag / open panel needs immediate rendering
     const before = this.suspendKeys.size > 0;
     if (on) this.suspendKeys.add(key);
     else this.suspendKeys.delete(key);

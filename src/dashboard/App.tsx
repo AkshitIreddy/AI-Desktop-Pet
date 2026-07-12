@@ -1,5 +1,5 @@
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { useDashboard, type PageId } from './state';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -51,6 +51,25 @@ export function App() {
   const tourHidden = useDashboard((s) => s.tourHidden);
   const setTourHidden = useDashboard((s) => s.setTourHidden);
   const [page, setPage] = useState<PageId>('characters');
+
+  // Freeze every CSS animation while the dashboard isn't focused/visible. It
+  // usually sits minimized in the tray while the pet runs, and WebView2 does
+  // NOT occlude a minimized/hidden Tauri window — so its decorative sprite-bob
+  // animations would otherwise keep the shared GPU process compositing at the
+  // monitor's refresh rate (~60% GPU on this machine). Resumes on focus.
+  useEffect(() => {
+    const sync = () =>
+      document.body.classList.toggle('cdp-idle', document.hidden || !document.hasFocus());
+    sync();
+    window.addEventListener('focus', sync);
+    window.addEventListener('blur', sync);
+    document.addEventListener('visibilitychange', sync);
+    return () => {
+      window.removeEventListener('focus', sync);
+      window.removeEventListener('blur', sync);
+      document.removeEventListener('visibilitychange', sync);
+    };
+  }, []);
 
   if (!ready) {
     return (
