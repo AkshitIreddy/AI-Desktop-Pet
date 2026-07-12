@@ -8,7 +8,9 @@ Tiny animated characters that walk your taskbar, climb your windows, chase your 
 [![License](https://img.shields.io/badge/license-see%20licenses%2F-8b5cf6)](./licenses)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)](https://tauri.app)
 
-<!-- 📸 TODO(Akshit): screenshot — hero desktop shot: several pets walking on windows/taskbar with a speech bubble visible -->
+<p align="center">
+  <img src="media/desktop-demo.gif" alt="Convai Desktop Pets walking the desktop, climbing app windows, and performing actions" width="820">
+</p>
 
 ---
 
@@ -26,7 +28,9 @@ Version 2.0 is a **complete rewrite** — same soul, entirely new body.
 - 🎨 **18 customization options** — themes, accent colors, pet size/opacity, activity level, speech bubble styles, synthesized sound packs, quiet hours, and more.
 - 📖 **In-app documentation** — a full illustrated guide lives right inside the dashboard.
 
-<!-- 📸 TODO(Akshit): screenshot — dashboard characters page -->
+<p align="center">
+  <img src="media/dashboard-characters.png" alt="The Characters page in the dashboard — toggle a character Active to spawn it on your desktop" width="820">
+</p>
 
 ---
 
