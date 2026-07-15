@@ -13,6 +13,7 @@ import {
   BEHAVIORS,
   BEHAVIORS_BY_ID,
   leavePlatform,
+  spacedSpotX,
   wait,
   type BehaviorCtx,
   type BehaviorDef,
@@ -281,13 +282,11 @@ class Director implements DirectorLink, DirectorHandle {
   /* ------------------------------ personal space ----------------------------- */
 
   private personalSpace(now: number): void {
+    // Sleeping/busy pets are kept as OBSTACLES (a free neighbour steps around
+    // them) but are never themselves woken/interrupted to move — proactive
+    // spaceOut already keeps pets from settling on top of each other.
     const arr = [...this.petsMap.values()].filter(
-      (p) =>
-        !p.hidden &&
-        p.grounded &&
-        !p.pinned &&
-        p.state !== 'sleeping' &&
-        p.state !== 'dragging',
+      (p) => !p.hidden && p.grounded && !p.pinned && p.state !== 'dragging',
     );
     const seen = new Set<string>();
     for (let i = 0; i < arr.length; i++) {
@@ -300,30 +299,32 @@ class Director implements DirectorLink, DirectorHandle {
           const since = this.overlapSince.get(key) ?? now;
           if (!this.overlapSince.has(key)) this.overlapSince.set(key, now);
           if (now - since > OVERLAP_DWELL_MS) {
-            const later =
-              (this.metas.get(a.rec.name)?.spawnSeq ?? 0) >
-              (this.metas.get(b.rec.name)?.spawnSeq ?? 0)
-                ? a
-                : b;
-            const other = later === a ? b : a;
-            const meta = this.metas.get(later.rec.name);
-            if (meta && this.isFree(later) && now > meta.sidestepAt) {
-              let dir = later.x + later.size / 2 >= other.x + other.size / 2 ? 1 : -1;
-              const step = 60 + Math.random() * 60;
-              // Sidesteps stay on the pet's own monitor.
-              const m = monitorOf(this.env, later);
-              const maxX = Math.max(m.left, m.right - later.size);
-              // Stacked at a screen edge — step inward instead of into the wall.
-              if (
-                (dir > 0 && later.x + step > maxX) ||
-                (dir < 0 && later.x - step < m.left)
-              ) {
-                dir = -dir;
+            // Move whichever pet is free to reposition; if both are, nudge the
+            // more-recently-spawned. If neither is free (busy/sleeping), leave
+            // it — the crowded one spaces out when it next settles.
+            const freeA = this.isFree(a);
+            const freeB = this.isFree(b);
+            let mover: Pet | null = null;
+            if (freeA && freeB) {
+              mover =
+                (this.metas.get(a.rec.name)?.spawnSeq ?? 0) >
+                (this.metas.get(b.rec.name)?.spawnSeq ?? 0)
+                  ? a
+                  : b;
+            } else if (freeA) {
+              mover = a;
+            } else if (freeB) {
+              mover = b;
+            }
+            const meta = mover ? this.metas.get(mover.rec.name) : null;
+            if (mover && meta && now > meta.sidestepAt) {
+              // Move to the nearest spot clear of ALL neighbours (same helper
+              // the proactive spacing uses), not a blind step away from one.
+              const tx = spacedSpotX(this.env, mover, this.petsMap.values());
+              if (tx !== null) {
+                void mover.walkTo(tx);
+                meta.sidestepAt = now + SIDESTEP_COOLDOWN_MS;
               }
-              void later.walkTo(
-                Math.min(Math.max(later.x + dir * step, m.left), maxX),
-              );
-              meta.sidestepAt = now + SIDESTEP_COOLDOWN_MS;
             }
             this.overlapSince.delete(key);
           }

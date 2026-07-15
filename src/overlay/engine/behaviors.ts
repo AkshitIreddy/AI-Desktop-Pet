@@ -114,6 +114,54 @@ function pickOne<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/* -------------------------- personal space (proactive) --------------------- */
+
+/** Center gap (fraction of pet size) below which two pets on the same level
+ *  read as standing on the same spot. */
+const CROWD_GAP = 0.72;
+
+/** A tidy, collision-free target x for `pet` when it's crowding same-level
+ *  neighbours, or null when it already has space.
+ *
+ *  Every pet in a crowded cluster sorts the cluster the SAME way (by name) and
+ *  takes its own lane, fanned out symmetrically around the cluster centre and
+ *  spaced by CROWD_GAP. This deterministically breaks the symmetry: two pets
+ *  stacked on the exact same pixel get DIFFERENT lanes instead of computing an
+ *  identical target and mirroring each other forever. The lanes step out a full
+ *  gap from the centre, so even moving just one of a stacked pair clears it. */
+export function spacedSpotX(
+  env: OverlayEnv,
+  pet: PetHandle,
+  pets: Iterable<PetHandle>,
+): number | null {
+  const m = monitorOf(env, pet);
+  const gap = pet.size * CROWD_GAP;
+  const cx = center(pet);
+  const cluster: PetHandle[] = [];
+  for (const p of pets) {
+    if (p.hidden || !p.grounded) continue;
+    if (Math.abs(p.y - pet.y) > pet.size * 0.5) continue; // different surface level
+    if (Math.abs(center(p) - cx) < gap) cluster.push(p); // crowding this pet (incl. itself)
+  }
+  if (cluster.length <= 1) return null; // has its space already
+  cluster.sort((a, b) => (a.rec.name < b.rec.name ? -1 : a.rec.name > b.rec.name ? 1 : 0));
+  const rank = cluster.indexOf(pet);
+  const clusterCx = cluster.reduce((s, p) => s + center(p), 0) / cluster.length;
+  // rank 0,1,2,3,… → −1,+1,−2,+2,… gaps from the centre.
+  const laneCx = clusterCx + (rank % 2 === 0 ? -1 : 1) * (Math.floor(rank / 2) + 1) * gap;
+  const maxX = Math.max(m.left, m.right - pet.size);
+  return Math.min(Math.max(Math.round(laneCx - pet.size / 2), m.left), maxX);
+}
+
+/** Step to a clear lane BEFORE settling (idle action / nap) so pets never sit
+ *  or sleep stacked on the exact same place. No-op / aborts cleanly otherwise. */
+async function spaceOut(ctx: BehaviorCtx): Promise<void> {
+  const tx = spacedSpotX(ctx.env, ctx.pet, ctx.director.pets.values());
+  if (tx !== null && !ctx.signal.aborted && Math.abs(tx - ctx.pet.x) > 4) {
+    await ctx.pet.walkTo(tx);
+  }
+}
+
 /**
  * Which union-outer edges the pet's monitor owns (screen-edge climbing only
  * exists on the leftmost monitor's left and the rightmost monitor's right).
@@ -184,10 +232,18 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: [],
     participants: 1,
     eligible: (_env, pet) => pet.grounded,
-    run: async ({ env, pet }) => {
+    run: async (ctx) => {
       // Wander range is the pet's CURRENT monitor — a pet placed on screen 2
       // stays on screen 2 (screen-hop is the only sanctioned crossing).
+      const { env, pet } = ctx;
       const m = monitorOf(env, pet);
+      // If crowding neighbours, break the clump by walking to the nearest clear
+      // spot; otherwise just roam a random distance.
+      const clear = spacedSpotX(env, pet, ctx.director.pets.values());
+      if (clear !== null) {
+        await pet.walkTo(clear);
+        return;
+      }
       const dir = Math.random() < 0.5 ? -1 : 1;
       const target = pet.x + dir * v1WalkDistance(m.right - m.left);
       await pet.walkTo(monitorClampX(m, target, pet.size));
@@ -230,8 +286,9 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: [],
     participants: 1,
     eligible: (_env, pet) => pet.grounded,
-    run: async ({ pet }) => {
-      await pet.playIdle();
+    run: async (ctx) => {
+      await spaceOut(ctx); // don't sit down on top of a neighbor
+      await ctx.pet.playIdle();
     },
   },
 
@@ -243,8 +300,9 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: [],
     participants: 1,
     eligible: (_env, pet) => pet.grounded,
-    run: async ({ pet }) => {
-      await pet.playSpecial();
+    run: async (ctx) => {
+      await spaceOut(ctx);
+      await ctx.pet.playSpecial();
     },
   },
 
@@ -608,7 +666,9 @@ export const BEHAVIORS: BehaviorDef[] = [
     locks: [],
     participants: 1,
     eligible: () => false, // director-triggered on cursor idle
-    run: async ({ env, pet, signal }) => {
+    run: async (ctx) => {
+      const { env, pet, signal } = ctx;
+      await spaceOut(ctx); // nap in a clear spot, not on top of another pet
       const sleptAt = env.cursor.lastMovedAt;
       pet.sleep(); // emits 'slept'
       while (!signal.aborted && env.cursor.lastMovedAt === sleptAt && !pet.hidden) {
