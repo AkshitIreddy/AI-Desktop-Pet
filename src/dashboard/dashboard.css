@@ -228,7 +228,7 @@ p {
 .cdp-logo-mark img {
   width: 24px;
   height: 24px;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
 .cdp-logo-name {
@@ -973,7 +973,7 @@ p {
   width: 76px;
   height: 76px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
   /* Continuous bob is intentional charm while the dashboard is open. It only
      costs GPU when the window is actually focused/visible — the body.cdp-idle
      rule (below) freezes it whenever the window is hidden/minimized. */
@@ -1117,7 +1117,7 @@ body.cdp-idle *::after {
   width: 30px;
   height: 30px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
   opacity: 0.65;
 }
 
@@ -1257,7 +1257,7 @@ body.cdp-idle *::after {
   width: 40px;
   height: 40px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
 .cdp-slideover-head h2 {
@@ -1345,7 +1345,7 @@ body.cdp-idle *::after {
   width: 40px;
   height: 40px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
   translate: -50% 0;
   transition: left 0.12s ease-out;
 }
@@ -1569,7 +1569,7 @@ body.cdp-idle *::after {
   width: 22px;
   height: 22px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
 .cdp-char-chip:hover {
@@ -1726,7 +1726,7 @@ body.cdp-idle *::after {
   width: 62px;
   height: 62px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
   animation: cdp-bob 3s ease-in-out infinite;
 }
 
@@ -1905,7 +1905,7 @@ body.cdp-idle *::after {
   width: 34px;
   height: 34px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
   animation: cdp-arc 2.4s ease-in-out infinite;
 }
 
@@ -1949,7 +1949,7 @@ body.cdp-idle *::after {
   width: 44px;
   height: 44px;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
 .cdp-onb-pick:hover {
@@ -2039,7 +2039,7 @@ body.cdp-idle *::after {
 .cdp-about-logo img {
   width: 56px;
   height: 56px;
-  image-rendering: pixelated;
+  image-rendering: auto;
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
 }
 
@@ -2426,7 +2426,7 @@ body.cdp-idle *::after {
   height: 42px;
   flex: none;
   object-fit: contain;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
 .cdp-import-meta {
