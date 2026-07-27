@@ -1,7 +1,7 @@
 {
   "name": "convai-desktop-pet",
   "private": true,
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "AI-powered desktop companions built with Tauri and Convai",
   "type": "module",
   "scripts": {
