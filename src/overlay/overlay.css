@@ -477,6 +477,17 @@ body {
   overflow-wrap: break-word;
 }
 
+/* Belt-and-braces size cap. The text is already de-duplicated and truncated
+   upstream (sanitizeUtterance), but a bubble must NEVER be able to grow over
+   the screen the way a runaway utterance once did (issue #2). Clamped on this
+   inner element so the bubble's tail pseudo-element is not clipped. */
+.speech-bubble-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  overflow: hidden;
+}
+
 .speech-bubble::after {
   content: '';
   position: absolute;

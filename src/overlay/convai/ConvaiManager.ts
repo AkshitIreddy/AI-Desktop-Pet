@@ -52,6 +52,37 @@ const KEEP_ALIVE_MS = 60_000;
 const RECONNECT_BACKOFF_MS = [15_000, 60_000, 5 * 60_000];
 const MAX_NOTE_REACT_CHARS = 200;
 const RAW_DETAIL_MAX_CHARS = 140;
+/** Hard cap on a single spoken utterance shown in a bubble / fed to crosstalk. */
+const UTTERANCE_MAX_CHARS = 240;
+
+/**
+ * Guard against LLM repetition loops (issue #2): drop sentences the model has
+ * already said in this same utterance and hard-cap the length.
+ *
+ * A looping generation otherwise grows without bound — it inflates the speech
+ * bubble until it covers the screen, and in crosstalk the runaway text is
+ * quoted into the partner's next prompt, which amplifies the loop further.
+ */
+export function sanitizeUtterance(raw: string): string {
+  const text = raw.replace(/\s+/g, ' ').trim();
+  if (text.length === 0) return '';
+  // Split into sentences, keeping their terminators (and any closing quote).
+  const parts = text.match(/[^.!?…]+[.!?…]*["'”’]?\s*/g) ?? [text];
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const part of parts) {
+    const piece = part.trim();
+    // Compare ignoring quotes/case/spacing so `"X."X.` collapses to one.
+    const key = piece.replace(/["'“”‘’\s]/g, '').toLowerCase();
+    if (key.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(piece);
+  }
+  const out = kept.join(' ').trim() || text;
+  return out.length > UTTERANCE_MAX_CHARS
+    ? `${out.slice(0, UTTERANCE_MAX_CHARS - 1).trimEnd()}…`
+    : out;
+}
 
 /** Single-line, length-capped raw error text for user-visible detail. */
 function rawDetail(err: unknown): string {
@@ -1113,9 +1144,13 @@ class PetSession implements PetConvai {
   }
 
   private emitBubble(text: string, final: boolean): void {
+    // Sanitized at the single emit point so BOTH the bubble UI and crosstalk
+    // (which awaits these events) see de-duplicated, length-capped text.
+    const clean = sanitizeUtterance(text);
+    if (clean.length === 0) return;
     for (const cb of this.bubbleCbs) {
       try {
-        cb(text, final);
+        cb(clean, final);
       } catch {
         // Listener errors never propagate.
       }

@@ -5,6 +5,11 @@
  * (the global cap). Each turn: prompt the speaker with what the other just
  * said, wait for their reply via the bubble stream (30 s timeout), then swap.
  * Only one voice plays at a time; quiet hours and despawns abort silently.
+ *
+ * Deliberately SHORT: one exchange by default (a remark and a reply). The
+ * partner's line is quoted back only in part and the prompt forbids echoing,
+ * and the run stops early if the two start repeating each other — an
+ * unbounded back-and-forth reads as a loop and snowballs the text (issue #2).
  */
 import type { AppSettings } from '../../shared/types';
 import type { CrosstalkApi, PetConvai } from './api';
@@ -29,6 +34,18 @@ const TURN_TIMEOUT_MS = 30_000;
 const BETWEEN_TURNS_MS = 700;
 const QUIET_CHATTER_THRESHOLD = 15;
 const GIST_MAX_CHARS = 90;
+/** How much of the partner's line is quoted back. Quoting a long reply invites
+ *  the model to echo it, which snowballs across turns (issue #2). */
+const QUOTE_MAX_CHARS = 120;
+
+/** Loose similarity check used to stop a pair that has started repeating. */
+function samey(a: string, b: string): boolean {
+  const norm = (s: string) => s.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  const x = norm(a);
+  const y = norm(b);
+  if (x.length === 0 || y.length === 0) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
 
 export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
   let running = false;
@@ -99,14 +116,26 @@ export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
           const other = deps.forPet(listener);
           if (other.status().activity === 'speaking') other.interrupt();
           const preamble = `You are hanging out with ${deps.displayName(listener)}, another desktop companion. `;
+          // Never quote the partner's full line back — a long quote invites the
+          // model to echo it, and the echo compounds every turn (issue #2).
+          const quoted =
+            lastText !== null && lastText.length > QUOTE_MAX_CHARS
+              ? `${lastText.slice(0, QUOTE_MAX_CHARS).trimEnd()}…`
+              : lastText;
+          const brevity =
+            ' Reply with ONE short sentence. Do not repeat or quote what they said.';
           const promptText =
             lastText === null
               ? preamble +
-                (topic ?? 'Casually start a short friendly chat with them — one or two sentences.')
-              : `${preamble}They just said: "${lastText}". Reply briefly in character.`;
+                (topic ??
+                  'Casually start a short friendly chat with them — one sentence, no more.')
+              : `${preamble}They just said: "${quoted}".${brevity}`;
           const reply = await speakTurn(speaker, promptText);
           if (stopped) break outer;
           if (reply === null || reply.trim() === '') break outer; // fizzled
+          // The pair has started echoing each other — end the exchange rather
+          // than let it spiral.
+          if (lastText !== null && samey(reply, lastText)) break outer;
           lastText = reply;
           if (gist === null) gist = reply;
           await delay(BETWEEN_TURNS_MS);
@@ -130,7 +159,9 @@ export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
       return running;
     },
 
-    async start(a: string, b: string, topic?: string, turns = 3): Promise<void> {
+    // turns = 1 is ONE exchange (initiator speaks, partner replies). Ambient
+    // crosstalk should read as a passing remark, not a conversation.
+    async start(a: string, b: string, topic?: string, turns = 1): Promise<void> {
       if (running || a === b) return;
       if (inQuietHours(deps.getSettings())) return;
       if (!deps.isSpawned(a) || !deps.isSpawned(b)) return;

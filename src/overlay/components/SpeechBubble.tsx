@@ -82,7 +82,7 @@ export function SpeechBubble({ petName }: { petName: string }) {
               reduce ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 28 }
             }
           >
-            {text}
+            <span className="speech-bubble-text">{text}</span>
           </motion.div>
         )}
       </AnimatePresence>

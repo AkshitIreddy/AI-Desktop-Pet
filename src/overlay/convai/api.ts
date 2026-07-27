@@ -77,7 +77,8 @@ export interface CrosstalkApi {
   readonly active: boolean;
   /**
    * Run a short conversation between two spawned characters. Resolves when
-   * finished. turns = utterances per character (default 3).
+   * finished. turns = utterances per character (default 1 — a single
+   * exchange: initiator speaks, partner replies once).
    */
   start(a: string, b: string, topic?: string, turns?: number): Promise<void>;
   stop(): void;
