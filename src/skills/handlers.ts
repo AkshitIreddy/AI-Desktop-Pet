@@ -8,6 +8,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification';
 import { SKILLS } from './registry';
+import { DEFAULT_SETTINGS, freeWillCadenceLabel } from '../shared/constants';
 import { ipc } from '../shared/ipc';
 import { sounds } from '../shared/sounds';
 import type { AppStore } from '../shared/store';
@@ -159,10 +160,21 @@ export async function runSkill(ctx: SkillContext): Promise<void> {
       case 'free-will': {
         const next = !(store.state.characters[name]?.freeWill ?? false);
         await store.updateCharacter(name, { freeWill: next });
+        // Enabling free will while the global cadence is Off would look
+        // enabled but never speak — restore the default cadence and say so.
+        let restoredCadence = false;
+        if (next && store.state.settings.freeWillFrequency === 0) {
+          await store.saveSettings({
+            freeWillFrequency: DEFAULT_SETTINGS.freeWillFrequency,
+          });
+          restoredCadence = true;
+        }
         layer.refresh();
         ui.toast(
           next
-            ? `${rec.displayName} will now speak up freely`
+            ? restoredCadence
+              ? `${rec.displayName} will now speak up freely (free will was off globally — set to ${freeWillCadenceLabel(DEFAULT_SETTINGS.freeWillFrequency)})`
+              : `${rec.displayName} will now speak up freely`
             : `${rec.displayName} will stay quiet unless spoken to`,
           'info',
         );

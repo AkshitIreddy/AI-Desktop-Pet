@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import { appStore, spriteFolder, spriteUrl } from '../shared/store';
 import {
   ipc,
+  notifyDashboardChanged,
   onCharactersChanged,
   onCursorPos,
   onMonitorsChanged,
@@ -310,6 +311,13 @@ class OverlayRuntime {
       }),
       onOpenChatRequest((name) => overlayUi.openChat(name)),
     ]);
+
+    // Tell an open dashboard whenever the overlay writes (free-will toggled
+    // from the wheel, reminders, notes) so its UI updates live rather than
+    // only when the window regains focus.
+    appStore.onWrite(() => {
+      void notifyDashboardChanged().catch(() => {});
+    });
 
     useOverlayStore.setState({ ready: true, settings: { ...settings } });
     this.timer = window.setTimeout(this.loop, 0);

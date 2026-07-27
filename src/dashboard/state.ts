@@ -5,7 +5,12 @@
  * directly).
  */
 import { create } from 'zustand';
-import { ipc, notifyCharactersChanged, notifySettingsChanged } from '../shared/ipc';
+import {
+  ipc,
+  notifyCharactersChanged,
+  notifySettingsChanged,
+  onCharactersChanged,
+} from '../shared/ipc';
 import { sounds } from '../shared/sounds';
 import { appStore } from '../shared/store';
 import { applyTheme } from '../shared/theme';
@@ -14,7 +19,7 @@ import type {
   AppSettings,
   CharacterRecord,
 } from '../shared/types';
-import { DEFAULT_SETTINGS } from '../shared/constants';
+import { DEFAULT_SETTINGS, freeWillCadenceLabel } from '../shared/constants';
 
 export const APP_VERSION = __APP_VERSION__;
 
@@ -182,6 +187,18 @@ export const useDashboard = create<DashboardState>((set, get) => ({
     await appStore.updateCharacter(name, patch);
     set({ characters: snapshotCharacters() });
     await notifyCharactersChanged();
+    // Switching free will on while the global cadence is Off would silently do
+    // nothing — turn it back up to the default and say so, rather than leave a
+    // toggle that appears enabled but never speaks.
+    if (patch.freeWill === true && get().settings.freeWillFrequency === 0) {
+      await get().saveSettings({ freeWillFrequency: DEFAULT_SETTINGS.freeWillFrequency });
+      get().toast(
+        `Free will was switched off globally — comments are back on (${freeWillCadenceLabel(
+          DEFAULT_SETTINGS.freeWillFrequency,
+        )}). Adjust in Settings → Free will.`,
+        'info',
+      );
+    }
   },
 
   async setSpawned(name, spawned) {
@@ -242,6 +259,10 @@ async function refreshFromStore(): Promise<void> {
   });
 }
 
+// Live: the overlay emits this right after it writes (free-will toggled from
+// the skill wheel, a reminder added…), so an open dashboard updates at once.
+void onCharactersChanged(() => void refreshFromStore());
+// Fallbacks for anything that changed while this window was hidden.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') void refreshFromStore();
 });

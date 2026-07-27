@@ -60,6 +60,7 @@ function buildDefaultCharacters(): Record<string, CharacterRecord> {
 export class AppStore {
   private store = new LazyStore(FILE);
   private listeners = new Set<Listener>();
+  private writeListeners = new Set<() => void>();
   state!: PersistedState;
 
   /**
@@ -160,6 +161,16 @@ export class AppStore {
     await this.store.set(KEY, this.state);
     await this.store.save();
     for (const cb of this.listeners) cb(this.state);
+    for (const cb of this.writeListeners) cb();
+  }
+
+  /**
+   * Fires after a LOCAL write only (never on reload), so a window can tell the
+   * other window "I changed something" without the two echoing each other.
+   */
+  onWrite(cb: () => void): () => void {
+    this.writeListeners.add(cb);
+    return () => this.writeListeners.delete(cb);
   }
 
   /**

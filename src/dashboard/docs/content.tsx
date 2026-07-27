@@ -14,6 +14,7 @@ import {
   DEFAULT_SETTINGS,
   LATEST_RELEASE_URL,
   REPO_URL,
+  freeWillCadenceLabel,
 } from '../../shared/constants';
 import type { SkillDef } from '../../shared/types';
 import { ALL_SKILL_IDS, SKILLS } from '../../skills/registry';
@@ -217,11 +218,11 @@ const SETTING_ROWS: Array<{ name: string; range: string; def: string; what: stri
   { name: 'Window walking', range: 'on / off', def: D.windowWalking ? 'on' : 'off', what: 'Lets pets treat your app windows as terrain: top-edge walks, sill sits, peeks, new-window curiosity, and the “Climb my window” skill.' },
   { name: 'Cursor interactions', range: 'on / off', def: D.cursorInteractions ? 'on' : 'off', what: 'Cursor chasing, watching and inspecting, plus the “Follow cursor” skill.' },
   { name: 'Character interactions', range: 'on / off', def: D.characterInteractions ? 'on' : 'off', what: 'All multi-pet behaviors — strolls, greetings, parades — plus “Summon friends” and “Friend chat”.' },
-  { name: 'Chatter frequency', range: '0–100', def: D.chatterFrequency ? `${D.chatterFrequency}` : 'off', what: 'How often spawned characters strike up conversations with each other on their own. Off = never unprompted.' },
+  { name: 'Chatter frequency', range: 'Off – 100%', def: D.chatterFrequency ? `${D.chatterFrequency}%` : 'off', what: 'The chance two characters trade a line when they bump into each other. Off = they never start a chat on their own (the Friend chat skill still works).' },
   { name: 'Speech bubbles', range: 'glass · solid · retro / 12–20 px / 2–15 s', def: `${D.speechBubbleStyle}, ${D.speechBubbleFontSize} px, ${D.speechBubbleSeconds} s`, what: 'Bubble style, text size, and how long a bubble lingers after the voice finishes.' },
   { name: 'Voice volume', range: '0–100', def: `${D.voiceVolume}`, what: 'Loudness of character voices. Each character also has its own voice on/off toggle.' },
   { name: 'Sound effects', range: 'soft · glass · retro · off / 0–100', def: `${D.soundPack}, ${D.sfxVolume}`, what: 'UI cue pack (wheel, messages, chimes, landings) and its volume. All synthesized — the app ships zero audio files.' },
-  { name: 'Free-will frequency', range: '0–100', def: `${D.freeWillFrequency}`, what: 'How chatty characters with Free will enabled are when commenting unprompted.' },
+  { name: 'Free-will frequency', range: 'Off – ~45s', def: freeWillCadenceLabel(D.freeWillFrequency), what: 'Roughly how long between unprompted comments, for each character that has Free will switched on. Off silences all of them.' },
   { name: 'Quiet hours', range: 'HH:MM–HH:MM or off', def: D.quietHoursStart ? `${D.quietHoursStart}–${D.quietHoursEnd}` : 'off', what: 'Silences unprompted comments and crosstalk during the window. Direct chats still work.' },
   { name: 'Screen vision', range: '0.25–2 fps / 1–30 min', def: `${D.visionFps} fps, ${D.visionSessionMinutes} min`, what: 'Capture rate while a vision grant is active, and how long a grant lasts before auto-revoking.' },
   { name: 'Idle sleep', range: '0–60 min (0 = never)', def: `${D.idleSleepMinutes} min`, what: 'Pets nap after this many minutes without cursor movement, and wake to greet you.' },

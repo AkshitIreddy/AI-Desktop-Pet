@@ -90,6 +90,28 @@ export const LEGACY_DEFAULT_BUMPS: Array<{
   { key: 'chatterFrequency', from: 35, to: 0 },
 ];
 
+/**
+ * freeWillFrequency 0–100 → minutes between ambient nudges (0 → never).
+ * Piecewise linear so the default (55) lands at ~3 min (2–4 min with jitter)
+ * and the max (100) at ~45 s: 100→0.75 min, 55→3 min, 1→~24.6 min.
+ *
+ * Lives here (not in the overlay) so Settings can label the slider with the
+ * real cadence from the same source of truth the scheduler uses.
+ */
+export function freeWillIntervalMinutes(frequency: number): number | null {
+  if (frequency <= 0) return null;
+  const f = Math.min(100, Math.max(1, frequency));
+  if (f >= 55) return 3 - (f - 55) * 0.05; // 55→3 min … 100→0.75 min (45 s)
+  return 3 + (55 - f) * 0.4; // 54→3.4 min … 1→24.6 min
+}
+
+/** Human cadence for a freeWillFrequency value ("Off", "~45 s", "~3 min"). */
+export function freeWillCadenceLabel(frequency: number): string {
+  const min = freeWillIntervalMinutes(frequency);
+  if (min === null) return 'Off';
+  return min < 1 ? `~${Math.round(min * 60)}s` : `~${Math.round(min)} min`;
+}
+
 /** Base timing constants of the v1 shimeji engine (before animationSpeed scaling). */
 export const BASE_FRAME_MS = 200;
 export const BASE_MOVE_MS = 12;

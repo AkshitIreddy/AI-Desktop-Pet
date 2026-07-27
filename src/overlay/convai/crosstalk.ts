@@ -168,6 +168,11 @@ export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
       // Watch party takes precedence: a pet with an active vision grant is
       // busy commentating on the user's screen and skips crosstalk pairing.
       if (deps.forPet(a).status().visionActive || deps.forPet(b).status().visionActive) return;
+      // Never open a chat over someone who is mid-thought or mid-sentence.
+      for (const n of [a, b]) {
+        const act = deps.forPet(n).status().activity;
+        if (act === 'thinking' || act === 'speaking') return;
+      }
       running = true;
       stopped = false;
       try {

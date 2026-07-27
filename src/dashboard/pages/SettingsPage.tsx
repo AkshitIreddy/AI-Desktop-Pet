@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { freeWillCadenceLabel } from '../../shared/constants';
 import { sounds } from '../../shared/sounds';
 import type {
   GpuPreference,
@@ -491,16 +492,23 @@ export function SettingsPage() {
           </Row>
           <Row
             q={q}
-            label="Chatter frequency"
-            hay="conversations crosstalk talk often"
-            hint="How often nearby characters strike up conversations on their own. Off by default — raise it to allow unprompted character-to-character talk."
+            label="Chance they chat"
+            hay="conversations crosstalk talk often percent meet"
+            hint={
+              <>
+                When two characters bump into each other, the chance they trade
+                a line. <strong>Off</strong> means they never start a chat on
+                their own — you can still start one anytime with the{' '}
+                <strong>Friend chat</strong> skill.
+              </>
+            }
           >
             <Slider
               label="Chatter frequency"
               min={0}
               max={100}
               value={s.chatterFrequency}
-              format={(v) => (v === 0 ? 'Off' : `${v}`)}
+              format={(v) => (v === 0 ? 'Off' : `${v}% when they meet`)}
               onChange={(chatterFrequency) => saveDebounced({ chatterFrequency })}
             />
           </Row>
@@ -661,16 +669,23 @@ export function SettingsPage() {
         >
           <Row
             q={q}
-            label="Frequency"
-            hay="cadence unprompted chatter"
-            hint="0 turns free-will chatter off globally."
+            label="How often"
+            hay="cadence frequency unprompted chatter minutes"
+            hint={
+              <>
+                Roughly how long between unprompted comments, per character.
+                Only characters with <strong>Free will</strong> switched on
+                (Characters&nbsp;→ Edit) ever speak up. <strong>Off</strong>{' '}
+                silences all of them.
+              </>
+            }
           >
             <Slider
               label="Free will frequency"
               min={0}
               max={100}
               value={s.freeWillFrequency}
-              format={(v) => (v === 0 ? 'Off' : `${v}`)}
+              format={(v) => freeWillCadenceLabel(v)}
               onChange={(freeWillFrequency) => saveDebounced({ freeWillFrequency })}
             />
           </Row>

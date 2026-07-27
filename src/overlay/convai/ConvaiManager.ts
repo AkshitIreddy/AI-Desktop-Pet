@@ -1186,6 +1186,11 @@ export function createConvaiLayer(deps: AppStore | { store: AppStore }): ConvaiL
       store.characters.filter((r) => r.spawned && !r.archived).map((r) => forSession(r.name).peer),
     liveCount: () => live.size,
     isBusy,
+    voiceBusy: () =>
+      [...sessions.values()].some((s) => {
+        const a = s.status().activity;
+        return a === 'thinking' || a === 'speaking';
+      }),
     visionActive: (name) => sessions.get(name)?.status().visionActive === true,
     stats: () => ({
       upcomingReminders: store.state.reminders.filter((r) => !r.fired).length,

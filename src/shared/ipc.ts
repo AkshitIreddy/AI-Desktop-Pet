@@ -87,6 +87,15 @@ export const onSettingsChanged = (
 export const notifyCharactersChanged = () =>
   emitTo('overlay', EVT_CHARACTERS_CHANGED, null);
 
+/**
+ * Overlay → dashboard: "I wrote to the shared store". Lets an open dashboard
+ * reflect overlay-side mutations (free-will toggled from the skill wheel, a
+ * reminder added, a note pinned) live, instead of only when the window
+ * regains focus. Targeted at 'main' only, so it can never echo back.
+ */
+export const notifyDashboardChanged = () =>
+  emitTo('main', EVT_CHARACTERS_CHANGED, null);
+
 export const onCharactersChanged = (cb: () => void): Promise<UnlistenFn> =>
   listen(EVT_CHARACTERS_CHANGED, () => cb());
 

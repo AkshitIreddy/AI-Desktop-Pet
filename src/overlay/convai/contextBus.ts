@@ -7,6 +7,7 @@
  * (run_llm "auto") let the server decide whether the character reacts;
  * prompts (run_llm "true") force a reply and DO connect on demand.
  */
+import { freeWillIntervalMinutes } from '../../shared/constants';
 import { ipc } from '../../shared/ipc';
 import type { AppSettings } from '../../shared/types';
 
@@ -31,6 +32,11 @@ export interface ContextBusDeps {
   liveCount(): number;
   /** Mid-crosstalk — an ambient nudge's reply would be captured as a crosstalk turn. */
   isBusy(name: string): boolean;
+  /**
+   * ANY pet is currently thinking or speaking. Free will holds off so pets
+   * take turns instead of talking over each other.
+   */
+  voiceBusy(): boolean;
   /** Vision grant active — the watch-party commentary loop replaces free-will nudges. */
   visionActive(name: string): boolean;
   /** Ambient color for free-will prompts: pending reminders + sticky notes. */
@@ -74,17 +80,9 @@ export function inQuietHours(settings: AppSettings, now: Date = new Date()): boo
   return start < end ? cur >= start && cur < end : cur >= start || cur < end;
 }
 
-/**
- * freeWillFrequency 0–100 → minutes between nudges (0→never). Piecewise
- * linear so the default (55) lands at ~3 min (2–4 min with jitter) and the
- * max (100) at ~45 s: 100→0.75 min, 55→3 min, 1→~24.6 min.
- */
-export function freeWillIntervalMinutes(frequency: number): number | null {
-  if (frequency <= 0) return null;
-  const f = Math.min(100, Math.max(1, frequency));
-  if (f >= 55) return 3 - (f - 55) * 0.05; // 55→3 min … 100→0.75 min (45 s)
-  return 3 + (55 - f) * 0.4; // 54→3.4 min … 1→24.6 min
-}
+// The frequency → cadence mapping lives in shared/constants so the Settings
+// slider can label itself with the exact cadence this scheduler uses.
+export { freeWillIntervalMinutes };
 
 function timeOfDay(d: Date): string {
   const h = d.getHours();
@@ -206,6 +204,10 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
     const intervalMin = freeWillIntervalMinutes(settings.freeWillFrequency);
     if (intervalMin === null) return;
     const now = Date.now();
+    // One voice at a time: if any pet is mid-thought or mid-sentence, let it
+    // finish. Due nudges are not lost — the schedule only advances for the pet
+    // that actually gets nudged, so everyone else fires on a later tick.
+    if (deps.voiceBusy()) return;
     for (const peer of deps.peers()) {
       if (!peer.freeWill() || !peer.spawned() || deps.isBusy(peer.name)) continue;
       const due = nextNudgeAt.get(peer.name);
@@ -242,6 +244,9 @@ export function createContextBus(deps: ContextBusDeps): ContextBus {
       } catch {
         // Ambient chatter must never surface errors.
       }
+      // At most ONE pet is nudged per tick — two pets whose schedules land on
+      // the same tick would otherwise start talking simultaneously.
+      return;
     }
   }
 
