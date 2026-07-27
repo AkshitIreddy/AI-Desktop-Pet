@@ -56,6 +56,14 @@ export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
     return new Promise((r) => setTimeout(r, ms));
   }
 
+  /** Wait (politely) until the pet is done thinking AND its voice stopped. */
+  async function waitUntilQuiet(pet: PetConvai, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!stopped && pet.isTalking() && Date.now() < deadline) {
+      await delay(250);
+    }
+  }
+
   /** Wait for the speaker's next finished utterance (final bubble). */
   function awaitReply(pet: PetConvai): { promise: Promise<string | null>; cleanup: () => void } {
     let off: (() => void) | null = null;
@@ -112,9 +120,12 @@ export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
           [b, a],
         ] as const) {
           if (stopped || !deps.isSpawned(a) || !deps.isSpawned(b)) break outer;
-          // One voice at a time — cut the previous speaker's TTS if it lingers.
-          const other = deps.forPet(listener);
-          if (other.status().activity === 'speaking') other.interrupt();
+          // One voice at a time — but by WAITING for the previous speaker to
+          // finish, never by cutting them off mid-sentence. (This used to
+          // interrupt(), which combined with the bubble-final/TTS race cut
+          // the first character off a word or two in.)
+          await waitUntilQuiet(deps.forPet(listener), TURN_TIMEOUT_MS);
+          if (stopped || !deps.isSpawned(a) || !deps.isSpawned(b)) break outer;
           const preamble = `You are hanging out with ${deps.displayName(listener)}, another desktop companion. `;
           // Never quote the partner's full line back — a long quote invites the
           // model to echo it, and the echo compounds every turn (issue #2).
@@ -169,10 +180,7 @@ export function createCrosstalk(deps: CrosstalkDeps): CrosstalkApi {
       // busy commentating on the user's screen and skips crosstalk pairing.
       if (deps.forPet(a).status().visionActive || deps.forPet(b).status().visionActive) return;
       // Never open a chat over someone who is mid-thought or mid-sentence.
-      for (const n of [a, b]) {
-        const act = deps.forPet(n).status().activity;
-        if (act === 'thinking' || act === 'speaking') return;
-      }
+      if (deps.forPet(a).isTalking() || deps.forPet(b).isTalking()) return;
       running = true;
       stopped = false;
       try {

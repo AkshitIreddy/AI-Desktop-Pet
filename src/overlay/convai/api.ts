@@ -20,6 +20,13 @@ export interface MemoryOps {
 export interface PetConvai {
   readonly name: string;
   status(): ConvaiStatus;
+  /**
+   * True while the character is thinking, or while its voice is audibly
+   * playing. Stronger than `status().activity === 'speaking'`: the server-side
+   * agent state and LOCAL audio playback can disagree (TTS lags the text
+   * stream), and this covers both.
+   */
+  isTalking(): boolean;
   onStatus(cb: (s: ConvaiStatus) => void): () => void;
   /** Full chat transcript snapshots (streaming entries update in place). */
   onChat(cb: (entries: ChatEntry[]) => void): () => void;

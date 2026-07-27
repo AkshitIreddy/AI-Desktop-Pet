@@ -54,6 +54,9 @@ const MAX_NOTE_REACT_CHARS = 200;
 const RAW_DETAIL_MAX_CHARS = 140;
 /** Hard cap on a single spoken utterance shown in a bubble / fed to crosstalk. */
 const UTTERANCE_MAX_CHARS = 240;
+/** How long after text completes we wait for TTS audio to begin before
+ *  treating the utterance as text-only and finalizing the bubble. */
+const SPEECH_START_GRACE_MS = 2_500;
 
 /**
  * Guard against LLM repetition loops (issue #2): drop sentences the model has
@@ -258,7 +261,16 @@ class PetSession implements PetConvai {
   private lastMessages: ChatMessage[] = [];
   /** sendUserTextMessage is not echoed into chatMessages — mirror it locally. */
   private localUser: ChatEntry[] = [];
-  private bubble = { id: null as string | null, text: '', finalized: true, pendingFinal: false };
+  private bubble = {
+    id: null as string | null,
+    text: '',
+    finalized: true,
+    pendingFinal: false,
+    /** Audio for this bubble actually started playing at some point. */
+    spoke: false,
+    /** Armed when text completes before audio starts (TTS latency). */
+    graceTimer: null as number | null,
+  };
 
   constructor(name: string, ctx: SessionCtx) {
     this.name = name;
@@ -303,6 +315,11 @@ class PetSession implements PetConvai {
 
   status(): ConvaiStatus {
     return { ...this.st };
+  }
+
+  isTalking(): boolean {
+    const a = this.st.activity;
+    return a === 'thinking' || a === 'speaking' || this.client_?.state.isSpeaking === true;
   }
 
   onStatus(cb: (s: ConvaiStatus) => void): () => void {
@@ -395,7 +412,7 @@ class PetSession implements PetConvai {
     } catch {
       // Not connected — nothing to interrupt.
     }
-    this.maybeFinalizeBubble();
+    this.forceFinalizeBubble(); // audio is being killed — no grace to wait for
     this.touchActivity();
   }
 
@@ -609,6 +626,7 @@ class PetSession implements PetConvai {
     await this.teardownClient();
     this.live.delete(this);
     this.st = { ...this.st, activity: 'disconnected', micOn: false };
+    this.clearBubbleGrace();
     this.statusCbs.clear();
     this.chatCbs.clear();
     this.bubbleCbs.clear();
@@ -893,7 +911,8 @@ class PetSession implements PetConvai {
       this.trackBubble(messages);
     });
     on('speakingChange', (speaking: boolean) => {
-      if (!speaking) this.maybeFinalizeBubble();
+      if (speaking) this.noteSpeechStarted();
+      else this.maybeFinalizeBubble();
     });
     on('turnEnd', () => {
       this.maybeFinalizeBubble();
@@ -1080,7 +1099,15 @@ class PetSession implements PetConvai {
     }
     if (last === null || last.content.length === 0) return;
     if (this.bubble.id !== last.id) {
-      this.bubble = { id: last.id, text: '', finalized: false, pendingFinal: false };
+      this.clearBubbleGrace();
+      this.bubble = {
+        id: last.id,
+        text: '',
+        finalized: false,
+        pendingFinal: false,
+        spoke: false,
+        graceTimer: null,
+      };
     }
     if (this.bubble.finalized) return;
     if (last.content !== this.bubble.text) {
@@ -1089,18 +1116,68 @@ class PetSession implements PetConvai {
     }
     if (last.isStreaming === false) {
       // Text is complete; hold `final` until the voice stops so the bubble's
-      // linger countdown starts at the end of speech, not the end of tokens.
-      if (this.client_?.state.isSpeaking) this.bubble.pendingFinal = true;
-      else this.finalizeBubble();
+      // linger countdown starts at the end of speech, not the end of tokens —
+      // AND so turn-gated listeners (crosstalk's awaitReply, free will's
+      // one-voice gate) don't advance while the voice is still playing.
+      this.bubble.pendingFinal = true;
+      if (!this.client_?.state.isSpeaking) this.armBubbleGrace();
     }
   }
 
+  /**
+   * Text completed but audio is not playing YET — TTS startup lags the text
+   * stream by up to a couple of seconds. Finalizing immediately here was the
+   * root of the talked-over bug: crosstalk took `final` as turn-over and its
+   * next turn interrupted this pet one word into its sentence. Instead, give
+   * speech a grace window to begin; finalize only if it never does (muted or
+   * voiceless characters).
+   */
+  private armBubbleGrace(): void {
+    if (this.bubble.graceTimer !== null || this.bubble.spoke) return;
+    this.bubble.graceTimer = window.setTimeout(() => {
+      this.bubble.graceTimer = null;
+      if (!this.client_?.state.isSpeaking) this.finalizeBubble();
+    }, SPEECH_START_GRACE_MS);
+  }
+
+  private clearBubbleGrace(): void {
+    if (this.bubble.graceTimer !== null) {
+      clearTimeout(this.bubble.graceTimer);
+      this.bubble.graceTimer = null;
+    }
+  }
+
+  /** Audio playback began for the current bubble (speakingChange true). */
+  private noteSpeechStarted(): void {
+    this.bubble.spoke = true;
+    this.clearBubbleGrace(); // final now waits for the audio to END
+  }
+
   private maybeFinalizeBubble(): void {
-    if (!this.bubble.finalized && this.bubble.text.length > 0) this.finalizeBubble();
+    if (this.bubble.finalized || this.bubble.text.length === 0) return;
+    // Voice still playing — final waits for speakingChange(false).
+    if (this.client_?.state.isSpeaking) {
+      this.bubble.pendingFinal = true;
+      return;
+    }
+    // Text done but speech never started: let the grace window decide instead
+    // of finalizing early (turnEnd can arrive before the first audio frame).
+    if (this.bubble.pendingFinal && !this.bubble.spoke) {
+      this.armBubbleGrace();
+      return;
+    }
+    this.finalizeBubble();
+  }
+
+  /** Unconditional finalize for teardown paths (interrupt, dispose). */
+  private forceFinalizeBubble(): void {
+    this.clearBubbleGrace();
+    this.finalizeBubble();
   }
 
   private finalizeBubble(): void {
     if (this.bubble.finalized || this.bubble.text.length === 0) return;
+    this.clearBubbleGrace();
     this.bubble.finalized = true;
     this.bubble.pendingFinal = false;
     this.emitBubble(this.bubble.text, true);
@@ -1186,11 +1263,7 @@ export function createConvaiLayer(deps: AppStore | { store: AppStore }): ConvaiL
       store.characters.filter((r) => r.spawned && !r.archived).map((r) => forSession(r.name).peer),
     liveCount: () => live.size,
     isBusy,
-    voiceBusy: () =>
-      [...sessions.values()].some((s) => {
-        const a = s.status().activity;
-        return a === 'thinking' || a === 'speaking';
-      }),
+    voiceBusy: () => [...sessions.values()].some((s) => s.isTalking()),
     visionActive: (name) => sessions.get(name)?.status().visionActive === true,
     stats: () => ({
       upcomingReminders: store.state.reminders.filter((r) => !r.fired).length,
