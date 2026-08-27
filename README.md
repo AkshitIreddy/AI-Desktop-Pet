@@ -1,15 +1,15 @@
-# 🎮 Convai Desktop Pets
+# 🎮 AI Desktop Pet
 
 > **Bring adorable AI-powered companions to your desktop — now alive like never before.**
 
 Tiny animated characters that walk your taskbar, climb your windows, chase your cursor, befriend each other, remember you, and hold real spoken conversations — powered by [Convai](https://convai.com).
 
-[![Latest release](https://img.shields.io/github/v/release/AkshitIreddy/convai-desktop-pet?label=release&color=ec4899)](https://github.com/AkshitIreddy/convai-desktop-pet/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/AkshitIreddy/AI-Desktop-Pet?label=release&color=ec4899)](https://github.com/AkshitIreddy/AI-Desktop-Pet/releases/latest)
 [![License](https://img.shields.io/badge/license-see%20licenses%2F-8b5cf6)](./licenses)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)](https://tauri.app)
 
 <p align="center">
-  <img src="media/desktop-demo.gif" alt="Convai Desktop Pets walking the desktop, climbing app windows, and performing actions" width="820">
+  <img src="media/desktop-demo.gif" alt="AI Desktop Pet characters walking the desktop, climbing app windows, and performing actions" width="820">
 </p>
 
 ---
@@ -36,7 +36,7 @@ Version 2.0 is a **complete rewrite** — same soul, entirely new body.
 
 ## 📥 Download
 
-Grab the installer for your OS from the **[latest release](https://github.com/AkshitIreddy/convai-desktop-pet/releases/latest)** — one release, every platform:
+Grab the installer for your OS from the **[latest release](https://github.com/AkshitIreddy/AI-Desktop-Pet/releases/latest)** — one release, every platform:
 
 | Platform | File |
 |----------|------|
@@ -44,7 +44,7 @@ Grab the installer for your OS from the **[latest release](https://github.com/Ak
 | 🍎 **macOS** | `Convai-Desktop-Pets_x.x.x.dmg` (Apple Silicon & Intel builds) |
 | 🐧 **Linux** | `.deb` package or `.AppImage` |
 
-👉 [View all releases](https://github.com/AkshitIreddy/convai-desktop-pet/releases)
+👉 [View all releases](https://github.com/AkshitIreddy/AI-Desktop-Pet/releases)
 
 ---
 
@@ -108,8 +108,8 @@ Every character can be re-pointed at any Convai character you create — custom 
 See **[BUILDING.md](./BUILDING.md)** for prerequisites, dev workflow, and the release process. The design document lives at [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ```bash
-git clone https://github.com/AkshitIreddy/convai-desktop-pet.git
-cd convai-desktop-pet
+git clone https://github.com/AkshitIreddy/AI-Desktop-Pet.git
+cd AI-Desktop-Pet
 npm install
 npm run tauri dev
 ```
