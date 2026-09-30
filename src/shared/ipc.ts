@@ -26,6 +26,8 @@ import {
 export const ipc = {
   updateHitRegions: (regions: Rect[]) =>
     invoke<void>('update_hit_regions', { regions }),
+  setOverlayPointerCapture: (captured: boolean) =>
+    invoke<void>('set_overlay_pointer_capture', { captured }),
   setOverlayFocusable: (focusable: boolean) =>
     invoke<void>('set_overlay_focusable', { focusable }),
   overlayReady: () => invoke<void>('overlay_ready'),

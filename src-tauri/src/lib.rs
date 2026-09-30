@@ -313,6 +313,7 @@ pub fn run() {
         .manage(overlay::OverlayState::default())
         .invoke_handler(tauri::generate_handler![
             overlay::update_hit_regions,
+            overlay::set_overlay_pointer_capture,
             overlay::set_overlay_focusable,
             overlay::set_cursor_stream,
             overlay::overlay_ready,

@@ -1,12 +1,13 @@
 {
   "name": "convai-desktop-pet",
   "private": true,
-  "version": "2.1.8",
+  "version": "2.1.9",
   "description": "AI-powered desktop companions built with Tauri and Convai",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test": "node --test",
     "preview": "vite preview",
     "tauri": "tauri"
   },

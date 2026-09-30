@@ -7,7 +7,8 @@
 //! flipping `set_ignore_cursor_events` when the cursor enters/leaves them.
 //!
 //! Invariants that keep the desktop safe:
-//! - Interactivity is ALWAYS region-scoped. Nothing (not even an open chat
+//! - Interactivity is region-scoped except during an actual captured mouse
+//!   gesture, which ends as soon as the button is released. Nothing (even chat
 //!   panel) may make the whole overlay opaque to input — a bug here freezes
 //!   the user's entire desktop, because the overlay is topmost + fullscreen.
 //! - All commands are `async` so they run off the main thread and can never
@@ -46,6 +47,8 @@ pub struct OverlayState {
     regions: Mutex<Vec<Rect>>,
     /// Whether the overlay currently accepts mouse input.
     interactive: AtomicBool,
+    /// Set only by pointer-down on a pet; the physical button is a fail-safe.
+    pointer_captured: AtomicBool,
     /// Whether a text input (chat, composer) currently holds keyboard focus.
     /// Affects focusability only — NEVER whole-window mouse interactivity.
     focus_held: AtomicBool,
@@ -66,6 +69,15 @@ pub async fn update_hit_regions(
 }
 
 #[tauri::command]
+pub async fn set_overlay_pointer_capture(
+    state: State<'_, OverlayState>,
+    captured: bool,
+) -> Result<(), String> {
+    state.pointer_captured.store(captured, Ordering::Relaxed);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn set_overlay_focusable(
     app: AppHandle,
     state: State<'_, OverlayState>,
@@ -73,7 +85,9 @@ pub async fn set_overlay_focusable(
 ) -> Result<(), String> {
     state.focus_held.store(focusable, Ordering::Relaxed);
     if let Some(overlay) = app.get_webview_window("overlay") {
-        overlay.set_focusable(focusable).map_err(|e| e.to_string())?;
+        overlay
+            .set_focusable(focusable)
+            .map_err(|e| e.to_string())?;
         // tao's set_focusable rewrites GWL_EXSTYLE wholesale and can clobber
         // WS_EX_TRANSPARENT; re-assert click-through immediately so the
         // overlay matches `interactive` now rather than one poll tick later.
@@ -116,16 +130,16 @@ pub struct OverlayDebug {
     pub regions: Vec<Rect>,
     pub interactive: bool,
     pub focus_held: bool,
+    pub pointer_captured: bool,
 }
 
 #[tauri::command]
-pub async fn debug_overlay_state(
-    state: State<'_, OverlayState>,
-) -> Result<OverlayDebug, String> {
+pub async fn debug_overlay_state(state: State<'_, OverlayState>) -> Result<OverlayDebug, String> {
     Ok(OverlayDebug {
         regions: state.regions.lock().map_err(|e| e.to_string())?.clone(),
         interactive: state.interactive.load(Ordering::Relaxed),
         focus_held: state.focus_held.load(Ordering::Relaxed),
+        pointer_captured: state.pointer_captured.load(Ordering::Relaxed),
     })
 }
 
@@ -227,31 +241,55 @@ fn cursor_poll_loop(app: AppHandle) {
             Ok(regions) => regions.iter().any(|r| r.contains(pos.x, pos.y)),
             Err(_) => continue,
         };
+        // JS pointer capture alone cannot prevent the native poller from
+        // switching to click-through between a fast move and the next hit
+        // update. Retain input for this gesture, with a physical-button
+        // fail-safe so a lost JS up/cancel can never trap the desktop.
+        #[cfg(windows)]
+        let captured = {
+            use windows::Win32::UI::Input::KeyboardAndMouse::{
+                GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
+            };
+            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SWAPBUTTON};
+            let primary_button = unsafe {
+                if GetSystemMetrics(SM_SWAPBUTTON) != 0 {
+                    VK_RBUTTON
+                } else {
+                    VK_LBUTTON
+                }
+            };
+            let pressed = unsafe { GetAsyncKeyState(primary_button.0 as i32) < 0 };
+            if !pressed {
+                state.pointer_captured.store(false, Ordering::Relaxed);
+            }
+            pressed && state.pointer_captured.load(Ordering::Relaxed)
+        };
+        #[cfg(not(windows))]
+        let captured = false;
+        let wants_input = inside || captured;
         // On Windows, reconcile against the live window style rather than the
         // cached flag so any clobbered WS_EX_TRANSPARENT bit is detected and
         // corrected within one tick (see is_interactive).
         #[cfg(windows)]
-        let current = overlay_hwnd.map_or_else(
-            || state.interactive.load(Ordering::Relaxed),
-            is_interactive,
-        );
+        let current =
+            overlay_hwnd.map_or_else(|| state.interactive.load(Ordering::Relaxed), is_interactive);
         #[cfg(not(windows))]
         let current = state.interactive.load(Ordering::Relaxed);
 
-        if inside != current {
+        if wants_input != current {
             #[cfg(windows)]
             {
                 if let Some(hwnd) = overlay_hwnd {
-                    if set_click_through(hwnd, !inside) {
-                        state.interactive.store(inside, Ordering::Relaxed);
+                    if set_click_through(hwnd, !wants_input) {
+                        state.interactive.store(wants_input, Ordering::Relaxed);
                     }
                 }
             }
             #[cfg(not(windows))]
             {
                 if let Some(overlay) = app.get_webview_window("overlay") {
-                    if overlay.set_ignore_cursor_events(!inside).is_ok() {
-                        state.interactive.store(inside, Ordering::Relaxed);
+                    if overlay.set_ignore_cursor_events(!wants_input).is_ok() {
+                        state.interactive.store(wants_input, Ordering::Relaxed);
                     }
                 }
             }

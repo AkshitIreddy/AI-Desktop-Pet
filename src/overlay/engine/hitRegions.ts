@@ -11,6 +11,8 @@ import type { Rect } from '../../shared/types';
 const FLUSH_MS = 50;
 
 const rects = new Map<string, Rect>();
+const captures = new Set<string>();
+let captureUpdate = Promise.resolve();
 let scale = 1;
 let originX = 0;
 let originY = 0;
@@ -45,6 +47,18 @@ function schedule(): void {
 }
 
 export const hitRegionRegistry = {
+  /** Keep native input through a captured gesture even while hit rectangles lag. */
+  capture(id: string, captured: boolean): void {
+    const wasCaptured = captures.size > 0;
+    if (captured) captures.add(id);
+    else captures.delete(id);
+    const nextCaptured = captures.size > 0;
+    if (wasCaptured === nextCaptured) return;
+    // Serialize down/up so a quick click cannot leave an older acquire pending.
+    captureUpdate = captureUpdate
+      .then(() => ipc.setOverlayPointerCapture(nextCaptured))
+      .catch(() => {});
+  },
   /** DPI scale factor (physical = logical × scale). */
   setScale(s: number): void {
     if (s > 0 && s !== scale) {

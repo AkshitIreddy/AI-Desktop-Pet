@@ -603,6 +603,9 @@ export class Pet implements PetHandle {
       if (now >= this.hideUntil) this.reappear();
       return;
     }
+    // Mouse-down holds the pet still while the UI distinguishes a click from
+    // a drag. Other pins only prevent new ambient behaviors.
+    if (this.pinReasons.has('pointer') && this.stateName !== 'dragging') return;
     this.revalidatePlatform();
     if (this.stateName === 'dragging') {
       this.transformStr = this.baseTransform(now);

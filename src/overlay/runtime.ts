@@ -8,6 +8,7 @@
  * (bubbles, wheel, vision badge) subscribe to per-frame callbacks instead.
  */
 import { create } from 'zustand';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { appStore, spriteFolder, spriteUrl } from '../shared/store';
 import {
   ipc,
@@ -28,9 +29,10 @@ import type {
   PetStateName,
   VirtualScreen,
 } from '../shared/types';
-import type { DirectorApi, DirectorEvent, MonitorRegion, OverlayEnv } from './engine/api';
+import type { DirectorApi, DirectorEvent, OverlayEnv } from './engine/api';
 import { createDirector } from './engine/BehaviorDirector';
 import { hitRegionRegistry } from './engine/hitRegions';
+import { displayGeometry } from './engine/displayGeometry';
 import { createConvaiLayer } from './convai/ConvaiManager';
 import type { ConvaiLayer } from './convai/api';
 import { clearPetSkillState, type UiApi } from '../skills/handlers';
@@ -207,22 +209,6 @@ function humanizeBehavior(id: string): string {
   return id.replace(/[-_]/g, ' ');
 }
 
-/**
- * Convert the physical-px monitor list into logical, origin-relative regions
- * for the engine. Each monitor keeps its own floor: the work-area bottom
- * (taskbar excluded) converted to logical px minus the union origin.
- */
-function toEnvMonitors(vs: VirtualScreen): MonitorRegion[] {
-  return vs.monitors.map((m) => ({
-    left: (m.x - vs.x) / vs.scale,
-    right: (m.x + m.w - vs.x) / vs.scale,
-    top: (m.y - vs.y) / vs.scale,
-    bottom: (m.y + m.h - vs.y) / vs.scale,
-    floorY: (m.workY + m.workH - vs.y) / vs.scale,
-    primary: m.primary,
-  }));
-}
-
 /** Loop interval while something is moving (~60 Hz sim, ~30 Hz DOM writes). */
 const ACTIVE_TICK_MS = 16;
 /** Decision-poll interval while the scene is at rest (compositor asleep). */
@@ -234,6 +220,7 @@ class OverlayRuntime {
   layer!: ConvaiLayer;
 
   private timer = 0;
+  private displayRefreshTimer = 0;
   private lastSimAt = 0;
   private lastDrawAt = 0;
   /** While `now < forceActiveUntil` the loop stays at 60 Hz (drag/spawn grace). */
@@ -255,21 +242,16 @@ class OverlayRuntime {
     const settings = appStore.state.settings;
 
     this.env = {
-      width: vs.w / vs.scale,
-      height: vs.h / vs.scale,
-      scale: vs.scale,
-      originX: vs.x,
-      originY: vs.y,
+      ...displayGeometry(vs, window.devicePixelRatio),
       cursor: { x: -1e4, y: -1e4, lastMovedAt: performance.now() },
       platforms: [],
-      monitors: toEnvMonitors(vs),
       settings,
     };
 
     applyTheme(settings);
     watchSystemTheme(() => appStore.state.settings);
     sounds.configure(settings.soundPack, settings.sfxVolume);
-    hitRegionRegistry.setScale(vs.scale);
+    hitRegionRegistry.setScale(this.env.scale);
     hitRegionRegistry.setOrigin(vs.x, vs.y);
 
     this.director = createDirector(this.env) as DirectorRuntime;
@@ -300,6 +282,7 @@ class OverlayRuntime {
       // Display/DPI/taskbar changes: refresh env in place (director holds the
       // same object by reference) and re-anchor hit-region conversions.
       onMonitorsChanged((next) => this.applyVirtualScreen(next)),
+      getCurrentWindow().onScaleChanged(() => this.scheduleDisplayRefresh()),
       // Chime + native notification come from the reminders engine itself;
       // the overlay only makes the pet celebrate.
       onReminderDue((r) => {
@@ -323,9 +306,13 @@ class OverlayRuntime {
     this.timer = window.setTimeout(this.loop, 0);
     await ipc.overlayReady();
     void syncHotkeys(settings);
+    // Windows can update the WebView's CSS scale after the native layout event.
+    // Re-read on resize as well so event ordering cannot leave a stale floor.
+    window.addEventListener('resize', this.scheduleDisplayRefresh);
 
     window.addEventListener('beforeunload', () => {
       if (this.timer) clearTimeout(this.timer);
+      if (this.displayRefreshTimer) clearTimeout(this.displayRefreshTimer);
       void this.layer.disposeAll();
     });
   }
@@ -364,22 +351,28 @@ class OverlayRuntime {
 
   /** Display change: refresh env in place, re-anchor hit regions, clamp pets. */
   private applyVirtualScreen(vs: VirtualScreen): void {
-    this.env.width = vs.w / vs.scale;
-    this.env.height = vs.h / vs.scale;
-    this.env.scale = vs.scale;
-    this.env.originX = vs.x;
-    this.env.originY = vs.y;
-    this.env.monitors = toEnvMonitors(vs);
-    hitRegionRegistry.setScale(vs.scale);
+    Object.assign(this.env, displayGeometry(vs, window.devicePixelRatio));
+    hitRegionRegistry.setScale(this.env.scale);
     hitRegionRegistry.setOrigin(vs.x, vs.y);
     // Pull pets that ended up outside the new bounds back inside.
     for (const pet of this.director.pets.values()) {
       const nx = clamp(pet.x, 0, Math.max(0, this.env.width - pet.size));
       const ny = clamp(pet.y, 0, Math.max(0, this.env.height - pet.size));
-      if (nx !== pet.x || ny !== pet.y) pet.teleport(nx, ny);
+      if (nx !== pet.x || ny !== pet.y) {
+        if (pet.state === 'dragging') this.director.dragTo(pet.rec.name, nx, ny);
+        else pet.teleport(nx, ny);
+      }
     }
     this.wake();
   }
+
+  private scheduleDisplayRefresh = (): void => {
+    if (this.displayRefreshTimer) clearTimeout(this.displayRefreshTimer);
+    this.displayRefreshTimer = window.setTimeout(() => {
+      this.displayRefreshTimer = 0;
+      void this.readVirtualScreen().then((vs) => this.applyVirtualScreen(vs)).catch(() => {});
+    }, 50);
+  };
 
   /* --------------------------- settings & characters --------------------------- */
 

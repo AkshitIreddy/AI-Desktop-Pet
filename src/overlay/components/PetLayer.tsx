@@ -3,13 +3,17 @@
  * frame and sprite transform are driven imperatively by the runtime's rAF loop
  * (via registerPetEl); React only mounts/unmounts and handles pointer input.
  */
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { overlayUi, runtime, useOverlayStore } from '../runtime';
+import { hitRegionRegistry } from '../engine/hitRegions';
+import type { PetHandle } from '../engine/api';
 
 const DRAG_THRESHOLD_PX = 6;
 const CLICK_MAX_MS = 300;
 
 interface Track {
+  el: HTMLDivElement;
+  pet: PetHandle;
   pointerId: number;
   startX: number;
   startY: number;
@@ -25,12 +29,55 @@ export function PetLayer() {
   const petOpacity = useOverlayStore((s) => s.settings.petOpacity);
   const tracks = useRef(new Map<string, Track>()).current;
 
+  const releaseTrack = (name: string): Track | undefined => {
+    const t = tracks.get(name);
+    if (!t) return;
+    tracks.delete(name);
+    t.pet.unpin('pointer');
+    delete t.el.dataset.dragging;
+    hitRegionRegistry.capture(`pet:${name}`, false);
+    runtime.setSuspendKey(`drag:${name}`, false);
+    try {
+      if (t.el.hasPointerCapture(t.pointerId)) t.el.releasePointerCapture(t.pointerId);
+    } catch {
+      // The element/pointer may already have been removed by Windows.
+    }
+    return t;
+  };
+
+  useEffect(() => {
+    const cancelAll = () => {
+      for (const name of tracks.keys()) {
+        const t = releaseTrack(name);
+        if (t?.dragging) runtime.director.endDrag(name, 0, 0);
+      }
+    };
+    window.addEventListener('blur', cancelAll);
+    return () => {
+      window.removeEventListener('blur', cancelAll);
+      cancelAll();
+    };
+  }, [tracks]);
+
+  useEffect(() => {
+    const names = new Set(pets.map((p) => p.name));
+    for (const name of tracks.keys()) {
+      if (!names.has(name)) releaseTrack(name);
+    }
+  }, [pets, tracks]);
+
   const onDown = (name: string, e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || tracks.has(name)) return;
     const pet = runtime.director.pets.get(name);
     if (!pet) return;
     runtime.setActivePet(name);
+    // Hold still from mouse-down, including the click-vs-drag threshold.
+    pet.pin('pointer');
+    runtime.setSuspendKey(`drag:${name}`, true);
+    hitRegionRegistry.capture(`pet:${name}`, true);
     tracks.set(name, {
+      el: e.currentTarget,
+      pet,
       pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
@@ -53,10 +100,9 @@ export function PetLayer() {
   const onMove = (name: string, e: React.PointerEvent<HTMLDivElement>) => {
     const t = tracks.get(name);
     if (!t || t.pointerId !== e.pointerId) return;
-    // Defense-in-depth: if the button is no longer down and we never started
-    // dragging, the track is stale — drop it instead of starting a phantom drag.
-    if (!t.dragging && (e.buttons & 1) === 0) {
-      tracks.delete(name);
+    // A missed up must release both the engine and native capture.
+    if ((e.buttons & 1) === 0) {
+      onCancel(name, e);
       return;
     }
     t.samples.push({ x: e.clientX, y: e.clientY, t: performance.now() });
@@ -65,7 +111,6 @@ export function PetLayer() {
       if (Math.hypot(e.clientX - t.startX, e.clientY - t.startY) <= DRAG_THRESHOLD_PX) return;
       t.dragging = true;
       runtime.director.beginDrag(name);
-      runtime.setSuspendKey(`drag:${name}`, true);
       e.currentTarget.dataset.dragging = 'true';
     }
     runtime.director.dragTo(name, e.clientX - t.grabDX, e.clientY - t.grabDY);
@@ -74,12 +119,9 @@ export function PetLayer() {
   const onUp = (name: string, e: React.PointerEvent<HTMLDivElement>) => {
     const t = tracks.get(name);
     if (!t || t.pointerId !== e.pointerId) return;
-    tracks.delete(name);
-    const el = e.currentTarget;
+    releaseTrack(name);
 
     if (t.dragging) {
-      delete el.dataset.dragging;
-      runtime.setSuspendKey(`drag:${name}`, false);
       // Release velocity ≈ px per 16 ms frame, from the last 4 move samples.
       let vx = 0;
       let vy = 0;
@@ -112,11 +154,9 @@ export function PetLayer() {
 
   const onCancel = (name: string, e: React.PointerEvent<HTMLDivElement>) => {
     const t = tracks.get(name);
-    if (!t) return;
-    tracks.delete(name);
+    if (!t || t.pointerId !== e.pointerId) return;
+    releaseTrack(name);
     if (t.dragging) {
-      delete e.currentTarget.dataset.dragging;
-      runtime.setSuspendKey(`drag:${name}`, false);
       runtime.director.endDrag(name, 0, 0);
     }
   };
@@ -141,6 +181,7 @@ export function PetLayer() {
           onPointerMove={(e) => onMove(p.name, e)}
           onPointerUp={(e) => onUp(p.name, e)}
           onPointerCancel={(e) => onCancel(p.name, e)}
+          onLostPointerCapture={(e) => onCancel(p.name, e)}
         >
           <div className="pet-body">
             <img src={p.frameSrc} alt={p.displayName} draggable={false} />
